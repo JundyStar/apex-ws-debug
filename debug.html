@@ -1,0 +1,1113 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Apex WebSocket 调试台</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #08111f;
+      --panel: #101c2f;
+      --panel-2: #14243a;
+      --line: #28405f;
+      --text: #e6edf7;
+      --muted: #8da2bf;
+      --blue: #4d9fff;
+      --green: #35d07f;
+      --yellow: #f5bf4f;
+      --red: #ff6b79;
+      --purple: #b38cff;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: radial-gradient(circle at top, #142a49, var(--bg) 48%); color: var(--text); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    button, input, select { font: inherit; }
+    .app { max-width: 1500px; margin: 0 auto; padding: 20px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+    h1, h2 { margin: 0; }
+    h1 { font-size: 21px; }
+    h2 { font-size: 15px; margin-bottom: 12px; }
+    .subtitle, .muted { color: var(--muted); }
+    .grid { display: grid; grid-template-columns: minmax(620px, 1.2fr) minmax(420px, .8fr); gap: 16px; }
+    .column { display: grid; gap: 16px; align-content: start; }
+    .panel { background: color-mix(in srgb, var(--panel) 94%, transparent); border: 1px solid var(--line); border-radius: 14px; padding: 16px; box-shadow: 0 14px 35px rgba(0,0,0,.18); }
+    .fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+    .field { display: grid; gap: 5px; }
+    .field.wide { grid-column: 1 / -1; }
+    label { color: var(--muted); font-size: 12px; }
+    input, select { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; color: var(--text); background: #0b1728; outline: none; }
+    input:focus, select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(77,159,255,.12); }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    button { border: 1px solid var(--line); border-radius: 8px; padding: 8px 13px; color: var(--text); background: var(--panel-2); cursor: pointer; }
+    button:hover { border-color: var(--blue); }
+    button.primary { border-color: #277bd9; background: #1769c2; }
+    button.success { border-color: #208e59; background: #147044; }
+    button.danger { border-color: #a6404c; background: #79303a; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .status-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .status { border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: #0b1728; }
+    .status .value { font-weight: 700; font-size: 16px; color: var(--blue); overflow-wrap: anywhere; }
+    .status .label { color: var(--muted); font-size: 11px; margin-top: 3px; }
+    .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+    .badge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .badge.ok { color: var(--green); }
+    .badge.warn { color: var(--yellow); }
+    .badge.bad { color: var(--red); }
+    .info { display: grid; grid-template-columns: 145px 1fr; gap: 7px 12px; margin: 0; }
+    .info dt { color: var(--muted); }
+    .info dd { margin: 0; overflow-wrap: anywhere; }
+    .log-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .log { height: 560px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; background: #06101d; padding: 10px; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .entry { padding: 7px 8px; border-bottom: 1px solid rgba(40,64,95,.45); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .entry.info { color: var(--muted); display: block; }
+    .entry.in { color: #7bc4ff; }
+    .entry.out { color: #8ce6b3; }
+    .entry.error { color: var(--red); }
+    .entry.marquee { color: #ddc8ff; background: rgba(179,140,255,.09); border-left: 3px solid var(--purple); }
+    .log.business-only .entry:not([data-category="business"]) { display: none; }
+    .hint { margin-top: 10px; padding: 9px 11px; border-left: 3px solid var(--yellow); background: rgba(245,191,79,.08); color: var(--muted); }
+    .danger-hint { border-left-color: var(--red); background: rgba(255,107,121,.08); }
+    .pool-list { max-height: 180px; overflow: auto; margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; background: #0b1728; }
+    .pool-row { display: grid; grid-template-columns: 42px 1fr 1fr; gap: 10px; padding: 6px 9px; border-bottom: 1px solid rgba(40,64,95,.45); font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .pool-row:last-child { border-bottom: 0; }
+    .tab-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; margin-bottom: 14px; }
+    .tabs { display: inline-flex; max-width: 100%; gap: 4px; padding: 4px; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: #0b1728; }
+    .tab-button { flex: 0 0 auto; border: 0; padding: 7px 12px; color: var(--muted); background: transparent; white-space: nowrap; }
+    .tab-button:hover { color: var(--text); border-color: transparent; }
+    .tab-button.active { color: var(--text); background: #1769c2; box-shadow: 0 3px 10px rgba(0,0,0,.2); }
+    .tab-panel[hidden] { display: none; }
+    .mode-switch { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+    .mode-switch-label { color: var(--muted); font-size: 12px; font-weight: 600; }
+    .mode-stack { display: grid; gap: 16px; }
+    .mode-stack[hidden] { display: none; }
+    @media (max-width: 1050px) { .grid { grid-template-columns: 1fr; } .log { height: 420px; } }
+    @media (max-width: 680px) { .fields, .status-row { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <h1>Apex WebSocket 调试台</h1>
+      <div class="subtitle">复用客户端登录、Token 刷新和 WebSocket 配置签发链路</div>
+    </div>
+    <span id="sessionBadge" class="badge">未登录</span>
+  </header>
+
+  <div class="grid">
+    <div class="column">
+      <section class="panel">
+        <h2>1. 环境配置</h2>
+        <div class="fields">
+          <div class="field wide"><label for="apiBase">客户端网关地址</label><input id="apiBase" placeholder="https://hitgameai.xyz"></div>
+          <div class="field"><label for="tenantId">Tenant ID</label><input id="tenantId" placeholder="upxlkhci"></div>
+          <div class="field"><label for="platformId">Platform ID</label><input id="platformId" placeholder="1r11yyd2"></div>
+          <div class="field"><label for="agentLineId">Agent Line ID</label><input id="agentLineId"></div>
+          <div class="field"><label for="regionCode">Region Code</label><input id="regionCode"></div>
+          <div class="field"><label for="deviceId">Device ID</label><input id="deviceId"></div>
+          <div class="field"><label for="devicePlatform">Device Platform</label><select id="devicePlatform"><option>WEB</option><option>IOS</option><option>ANDROID</option></select></div>
+          <div class="field wide"><label for="clientSignatureSecret">客户端请求签名密钥（仅保存在当前页面内存中）</label><input id="clientSignatureSecret" type="password" autocomplete="off" spellcheck="false" placeholder="请输入当前测试环境的签名密钥"></div>
+        </div>
+        <div class="hint">签名密钥不会保存到 localStorage、账号池或导出文件，页面刷新后需要重新输入。</div>
+        <div class="mode-switch">
+          <span class="mode-switch-label">2. 选择调试模式</span>
+          <div class="tabs" role="tablist" aria-label="调试模式">
+            <button id="singleDebugTabBtn" class="tab-button active" role="tab" aria-selected="true" aria-controls="singleDebugModePanel">单个调试（未连接）</button>
+            <button id="batchDebugTabBtn" class="tab-button" role="tab" aria-selected="false" aria-controls="batchDebugModePanel">批量调试（0/100）</button>
+          </div>
+        </div>
+      </section>
+
+      <div id="singleDebugModePanel" class="mode-stack" role="tabpanel" aria-labelledby="singleDebugTabBtn">
+      <section class="panel">
+        <h2>单个调试·系统登录</h2>
+        <div class="fields">
+          <div class="field"><label for="account">账号</label><input id="account" autocomplete="username"></div>
+          <div class="field"><label for="password">密码</label><input id="password" type="password" autocomplete="current-password"></div>
+        </div>
+        <div class="actions">
+          <button id="loginBtn" class="primary">登录并连接 WS</button>
+          <button id="refreshBtn" disabled>刷新登录 Token</button>
+          <button id="wsRefreshBtn" disabled>刷新 WS Token 并重连</button>
+          <button id="disconnectBtn" class="danger" disabled>断开</button>
+          <button id="clearSessionBtn">清除会话</button>
+        </div>
+        <div class="hint">页面不会自行签发 WS Token。它会登录客户端网关，然后调用 <code>/v1/client/websocket/config</code> 获取服务器签发的短期凭证。</div>
+      </section>
+
+      <section class="panel">
+        <h2>单个调试·连接状态</h2>
+        <div class="status-row">
+          <div class="status"><div id="accessCountdown" class="value">—</div><div class="label">登录 Token 剩余</div></div>
+          <div class="status"><div id="wsCountdown" class="value">—</div><div class="label">WS Token 剩余</div></div>
+          <div class="status"><div id="wsState" class="value">未连接</div><div class="label">WebSocket 状态</div></div>
+          <div class="status"><div id="heartbeatStats" class="value">0 / 0</div><div class="label">心跳发送 / 响应</div></div>
+          <div class="status"><div id="businessMessageCount" class="value">0</div><div class="label">收到业务消息（不含心跳）</div></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>单个调试·当前用户与路由</h2>
+        <dl id="userInfo" class="info"><dt>状态</dt><dd>登录后自动加载</dd></dl>
+      </section>
+      </div>
+
+      <div id="batchDebugModePanel" class="mode-stack" role="tabpanel" aria-labelledby="batchDebugTabBtn" hidden>
+      <section class="panel">
+        <div class="tab-header">
+          <h2 style="margin-bottom:0">批量调试</h2>
+          <div class="tabs" role="tablist" aria-label="批量调试功能">
+            <button id="accountPoolTabBtn" class="tab-button active" role="tab" aria-selected="true" aria-controls="accountPoolTabPanel">账号池管理（0）</button>
+            <button id="batchConnectionTabBtn" class="tab-button" role="tab" aria-selected="false" aria-controls="batchConnectionTabPanel">批量连接（0/0）</button>
+          </div>
+        </div>
+
+        <div id="accountPoolTabPanel" class="tab-panel" role="tabpanel" aria-labelledby="accountPoolTabBtn">
+        <div class="fields">
+          <div class="field"><label for="poolPrefix">账号前缀（字母和数字）</label><input id="poolPrefix" value="tws"></div>
+          <div class="field"><label for="poolCount">目标账号数</label><input id="poolCount" type="number" min="1" max="100" value="100"></div>
+          <div class="field"><label for="poolPassword">统一测试密码</label><input id="poolPassword" type="password" value="Aa123456" autocomplete="new-password"></div>
+          <div class="field"><label for="poolConcurrency">注册并发数</label><input id="poolConcurrency" type="number" min="1" max="10" value="5"></div>
+        </div>
+        <div class="actions">
+          <button id="createPoolBtn" class="primary">创建/补齐账号池</button>
+          <button id="exportPoolBtn">导出账号池</button>
+          <button id="importPoolBtn">导入账号池</button>
+          <button id="clearPoolBtn" class="danger">清除本地账号池</button>
+          <input id="poolFileInput" type="file" accept="application/json,.json" hidden>
+        </div>
+        <div class="status-row" style="margin-top:12px">
+          <div class="status"><div id="poolSize" class="value">0</div><div class="label">已保存账号</div></div>
+          <div class="status"><div id="poolCreated" class="value">0</div><div class="label">本次成功</div></div>
+          <div class="status"><div id="poolFailed" class="value">0</div><div class="label">本次失败</div></div>
+        </div>
+        <div id="poolList" class="pool-list"></div>
+        <div class="hint danger-hint">这会在当前平台创建真实测试玩家。账号和密码会明文保存在当前浏览器 localStorage，仅可在测试环境使用。</div>
+        </div>
+
+        <div id="batchConnectionTabPanel" class="tab-panel" role="tabpanel" aria-labelledby="batchConnectionTabBtn" hidden>
+        <div class="fields">
+          <div class="field"><label for="batchCount">连接数</label><input id="batchCount" type="number" min="1" max="100" value="100"></div>
+          <div class="field"><label for="batchConcurrency">启动并发数</label><input id="batchConcurrency" type="number" min="1" max="10" value="5"></div>
+        </div>
+        <div class="actions">
+          <button id="batchConnectBtn" class="success">批量登录并连接</button>
+          <button id="batchDisconnectBtn" class="danger" disabled>断开全部批量连接</button>
+        </div>
+        <div class="status-row" style="margin-top:12px">
+          <div class="status"><div id="batchOnline" class="value">0</div><div class="label">当前在线</div></div>
+          <div class="status"><div id="batchConnecting" class="value">0</div><div class="label">正在连接</div></div>
+          <div class="status"><div id="batchFailed" class="value">0</div><div class="label">连接失败</div></div>
+          <div class="status"><div id="batchHeartbeatStats" class="value">0 / 0</div><div class="label">心跳发送 / 响应</div></div>
+          <div class="status"><div id="batchBusiness" class="value">0</div><div class="label">收到业务消息</div></div>
+          <div class="status"><div id="batchCoverage" class="value">—</div><div class="label">最新业务消息覆盖</div></div>
+        </div>
+        <div class="hint">每个账号只建立 1 条连接，不会触发“同一用户最多 3 条连接”的挤下线规则。WS Token 会分散到期前自动换新。</div>
+        </div>
+      </section>
+      </div>
+    </div>
+
+    <section class="panel">
+      <div class="log-toolbar">
+        <h2>实时日志</h2>
+        <div class="actions" style="margin-top:0">
+          <button id="businessLogFilterBtn">仅看业务消息</button>
+          <button id="copyLogBtn">复制日志</button>
+          <button id="clearLogBtn">清空日志</button>
+        </div>
+      </div>
+      <div id="log" class="log"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const PATHS = {
+    loginKey: "/v1/client/auth/login-key",
+    login: "/v1/client/auth/login",
+    refresh: "/v1/client/auth/refresh",
+    currentUser: "/v1/client/users/me",
+    websocketConfig: "/v1/client/websocket/config"
+  };
+  const CONFIG_STORAGE_KEY = "apex-ws-debug-config-v1";
+  const ACCOUNT_POOL_STORAGE_KEY = "apex-ws-debug-account-pool-v1";
+  const enc = new TextEncoder();
+  const state = {
+    accessToken: "",
+    refreshToken: "",
+    currentUser: null,
+    websocketConfig: null,
+    websocket: null,
+    accessRefreshTimer: null,
+    websocketRefreshTimer: null,
+    heartbeatTimer: null,
+    reconnectTimer: null,
+    countdownTimer: null,
+    accessRefreshPromise: null,
+    websocketRenewPromise: null,
+    manualDisconnect: false,
+    heartbeatSentCount: 0,
+    businessMessageCount: 0,
+    heartbeatResponseCount: 0,
+    accountPool: [],
+    poolRunning: false,
+    poolCreated: 0,
+    poolFailed: 0,
+    batchClients: new Map(),
+    batchRunning: false,
+    batchHeartbeatTimer: null,
+    batchMaintenanceTimer: null,
+    batchFailed: 0,
+    batchEvents: new Map(),
+    latestBatchEventID: "",
+    businessLogOnly: false,
+    debugMode: "single"
+  };
+
+  const $ = id => document.getElementById(id);
+  const formIDs = ["apiBase", "tenantId", "platformId", "agentLineId", "regionCode", "deviceId", "devicePlatform", "poolPrefix", "poolCount", "poolConcurrency", "batchCount", "batchConcurrency"];
+
+  function nowSeconds() { return Math.floor(Date.now() / 1000); }
+  function normalizeBase(value) { return String(value || "").trim().replace(/\/+$/, ""); }
+  function randomID() {
+    if (crypto.randomUUID) return crypto.randomUUID().replaceAll("-", "");
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    return Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+  }
+  function bytesToBase64(bytes) {
+    let binary = "";
+    for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  }
+  function base64URLToObject(token) {
+    try {
+      let value = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+      value += "=".repeat((4 - value.length % 4) % 4);
+      const bytes = Uint8Array.from(atob(value), c => c.charCodeAt(0));
+      return JSON.parse(new TextDecoder().decode(bytes));
+    } catch (_) {
+      return {};
+    }
+  }
+  function tokenExpiry(token) { return Number(base64URLToObject(token).exp || 0); }
+  function formatRemaining(exp) {
+    if (!exp) return "—";
+    const seconds = Math.max(0, exp - nowSeconds());
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+  }
+  function formatJSON(value) {
+    try { return JSON.stringify(value, null, 2); } catch (_) { return String(value); }
+  }
+  function log(message, type = "info", category = "system") {
+    const node = document.createElement("div");
+    const text = typeof message === "string" ? message : formatJSON(message);
+    const marquee = text.includes("SUPER_MARQUEE_TRIGGERED");
+    node.className = `entry ${marquee ? "marquee" : type}`;
+    node.dataset.category = category;
+    node.textContent = `[${new Date().toLocaleTimeString("zh-CN", { hour12: false })}] ${text}`;
+    $("log").appendChild(node);
+    while ($("log").children.length > 2000) $("log").firstChild.remove();
+    $("log").scrollTop = $("log").scrollHeight;
+  }
+
+  function readConfig() {
+    const config = {};
+    for (const id of formIDs) config[id] = $(id).value.trim();
+    return config;
+  }
+  function validateConfig(config) {
+    const required = ["apiBase", "tenantId", "platformId", "agentLineId", "regionCode", "deviceId"];
+    const missing = required.filter(key => !config[key]);
+    if (missing.length) throw new Error(`环境配置缺少：${missing.join(", ")}`);
+  }
+  function saveConfig() {
+    const config = readConfig();
+    const safe = {};
+    for (const id of formIDs) safe[id] = config[id];
+    localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(safe));
+  }
+  function restoreConfig() {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(CONFIG_STORAGE_KEY) || "{}"); } catch (_) {}
+    for (const id of formIDs) if (saved[id]) $(id).value = saved[id];
+    if (!$("apiBase").value) $("apiBase").value = "https://hitgameai.xyz";
+    if (!$("deviceId").value) $("deviceId").value = `wsdebug-${randomID().slice(0, 16)}`;
+  }
+
+  async function hmacSignature(secret, timestamp, rawQuery, body) {
+    const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const signature = await crypto.subtle.sign("HMAC", key, enc.encode(timestamp + rawQuery + body));
+    return bytesToBase64(signature);
+  }
+  async function scopedApiRequest(path, { method = "GET", body = null, accessToken = "", deviceId = "" } = {}) {
+    const config = readConfig();
+    validateConfig(config);
+    const signatureSecret = $("clientSignatureSecret").value;
+    if (!signatureSecret) throw new Error("客户端请求签名密钥不能为空");
+    const requestDeviceID = String(deviceId || config.deviceId).trim();
+    if (!requestDeviceID) throw new Error("Device ID 不能为空");
+    const url = new URL(normalizeBase(config.apiBase) + path);
+    const rawBody = body === null ? "" : JSON.stringify(body);
+    const timestamp = String(nowSeconds());
+    const headers = {
+      "Accept": "application/json",
+      "X-Timestamp": timestamp,
+      "X-Tenant-ID": config.tenantId,
+      "X-Platform-ID": config.platformId,
+      "X-Region-Code": config.regionCode,
+      "X-Agent-Line-ID": config.agentLineId,
+      "X-Device-ID": requestDeviceID,
+      "X-Request-ID": `wsdebug-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      "X-Signature": await hmacSignature(signatureSecret, timestamp, url.search.slice(1), rawBody)
+    };
+    if (rawBody) headers["Content-Type"] = "application/json";
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+    const response = await fetch(url, { method, headers, body: rawBody || undefined });
+    const text = await response.text();
+    let decoded = null;
+    try { decoded = text ? JSON.parse(text) : {}; } catch (_) { decoded = { raw: text }; }
+    if (!response.ok) throw new Error(`${method} ${path} 返回 ${response.status}: ${formatJSON(decoded)}`);
+    return decoded;
+  }
+  async function apiRequest(path, { method = "GET", body = null, auth = false } = {}) {
+    if (auth && !state.accessToken) throw new Error("尚未登录");
+    return scopedApiRequest(path, { method, body, accessToken: auth ? state.accessToken : "" });
+  }
+
+  function pemToArrayBuffer(pem) {
+    const raw = pem.replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s/g, "");
+    return Uint8Array.from(atob(raw), c => c.charCodeAt(0)).buffer;
+  }
+  async function encryptPassword(publicKeyPEM, password) {
+    const key = await crypto.subtle.importKey("spki", pemToArrayBuffer(publicKeyPEM), { name: "RSA-OAEP", hash: "SHA-256" }, false, ["encrypt"]);
+    return bytesToBase64(await crypto.subtle.encrypt({ name: "RSA-OAEP" }, key, enc.encode(password)));
+  }
+
+  async function authenticateAccount({ account, password, deviceId, loginType = "LOGIN_TYPE_ACCOUNT", nickname = "" }) {
+    const loginKey = await scopedApiRequest(PATHS.loginKey, { method: "POST", body: {}, deviceId });
+    if (!loginKey.key_id || !loginKey.public_key_pem) throw new Error("登录公钥响应不完整");
+    const ciphertext = await encryptPassword(loginKey.public_key_pem, password);
+    const config = readConfig();
+    const body = {
+      login_type: loginType,
+      device: {
+        device_platform: config.devicePlatform || "WEB",
+        device_manufacturer: "ApexWsDebug",
+        device_model: "BrowserPool",
+        system_version: navigator.platform || "Web"
+      },
+      credential: { account, password_ciphertext: ciphertext, password_key_id: loginKey.key_id }
+    };
+    if (loginType === "LOGIN_TYPE_REGISTER") body.profile = { nickname: nickname || account };
+    return scopedApiRequest(PATHS.login, { method: "POST", body, deviceId });
+  }
+
+  async function login() {
+    setDebugMode("single");
+    const config = readConfig();
+    validateConfig(config);
+    const account = $("account").value.trim();
+    const password = $("password").value;
+    if (!account || !password) throw new Error("请输入账号和密码");
+    saveConfig();
+    setBusy(true);
+    log("正在获取一次性登录公钥并登录…");
+    const response = await authenticateAccount({ account, password, deviceId: config.deviceId });
+    $("password").value = "";
+    state.accessToken = response.token || "";
+    state.refreshToken = response.refresh_token || "";
+    state.currentUser = response.current_user || null;
+    if (!state.accessToken || !state.refreshToken) throw new Error("登录响应缺少 Access Token 或 Refresh Token");
+    log("登录成功", "in");
+    await loadCurrentUser();
+    scheduleAccessRefresh();
+    await renewWebSocket("登录完成");
+    updateUI();
+  }
+
+  async function refreshAccessToken() {
+    if (state.accessRefreshPromise) return state.accessRefreshPromise;
+    if (!state.refreshToken) throw new Error("没有可用的 Refresh Token，请重新登录");
+    state.accessRefreshPromise = (async () => {
+      log("正在刷新登录 Token…");
+      const response = await apiRequest(PATHS.refresh, { method: "POST", body: { refresh_token: state.refreshToken } });
+      if (!response.token) throw new Error("刷新响应缺少 Access Token");
+      state.accessToken = response.token;
+      if (response.refresh_token) state.refreshToken = response.refresh_token;
+      scheduleAccessRefresh();
+      updateUI();
+      log("登录 Token 刷新成功", "in");
+      return response;
+    })().finally(() => { state.accessRefreshPromise = null; });
+    return state.accessRefreshPromise;
+  }
+
+  async function ensureAccessToken() {
+    const exp = tokenExpiry(state.accessToken);
+    if (!state.accessToken) throw new Error("尚未登录");
+    if (!exp || exp - nowSeconds() <= 90) await refreshAccessToken();
+  }
+  function scheduleAccessRefresh() {
+    clearTimeout(state.accessRefreshTimer);
+    const exp = tokenExpiry(state.accessToken);
+    if (!exp) return;
+    const delay = Math.max(1000, (exp - nowSeconds() - 60) * 1000);
+    state.accessRefreshTimer = setTimeout(() => refreshAccessToken().catch(handleError), delay);
+  }
+
+  async function loadCurrentUser() {
+    await ensureAccessToken();
+    const response = await apiRequest(PATHS.currentUser, { auth: true });
+    state.currentUser = response.user || state.currentUser;
+    updateUserInfo();
+  }
+  async function fetchWebSocketConfig() {
+    await ensureAccessToken();
+    const response = await apiRequest(PATHS.websocketConfig, { auth: true });
+    if (!response.websocket?.url || !response.websocket?.token) throw new Error("WebSocket 配置响应不完整");
+    state.websocketConfig = response.websocket;
+    return response.websocket;
+  }
+
+  async function renewWebSocket(reason = "手动刷新") {
+    if (state.websocketRenewPromise) return state.websocketRenewPromise;
+    state.websocketRenewPromise = (async () => {
+      log(`${reason}：正在获取新的 WS Token…`);
+      const config = await fetchWebSocketConfig();
+      await connectWebSocket(config);
+      scheduleWebSocketRefresh();
+      updateUI();
+    })().finally(() => { state.websocketRenewPromise = null; });
+    return state.websocketRenewPromise;
+  }
+
+  function websocketURL(config) {
+    const url = new URL(config.url);
+    url.searchParams.set("token", config.token);
+    return url.toString();
+  }
+  function connectWebSocket(config) {
+    return new Promise((resolve, reject) => {
+      state.manualDisconnect = false;
+      const previous = state.websocket;
+      const socket = new WebSocket(websocketURL(config));
+      let settled = false;
+      socket.onopen = () => {
+        settled = true;
+        state.websocket = socket;
+        if (previous && previous !== socket) {
+          previous.onclose = null;
+          previous.close(1000, "token renewed");
+        }
+        startHeartbeat();
+        updateUI();
+        const claims = base64URLToObject(config.token);
+        log(`WebSocket 已连接：namespace=${claims.tid || ""}, group=${claims.gid || ""}, user=${claims.uid || ""}`, "in");
+        resolve();
+      };
+      socket.onmessage = event => {
+        let value = event.data;
+        try { value = JSON.parse(event.data); } catch (_) {}
+        const messageType = typeof value === "object" && value !== null
+          ? String(value.message_type || "").toLowerCase()
+          : "";
+        if (messageType === "pong") {
+          state.heartbeatResponseCount++;
+        } else if (messageType !== "ping") {
+          state.businessMessageCount++;
+        }
+        log(value, "in", messageType === "ping" || messageType === "pong" ? "heartbeat" : "business");
+        updateUI();
+      };
+      socket.onerror = () => {
+        log("WebSocket 发生错误", "error");
+        if (!settled) reject(new Error("WebSocket 握手失败"));
+      };
+      socket.onclose = event => {
+        if (!settled) reject(new Error(`WebSocket 连接关闭：${event.code} ${event.reason || ""}`));
+        if (state.websocket !== socket) return;
+        stopHeartbeat();
+        state.websocket = null;
+        updateUI();
+        log(`WebSocket 已断开：code=${event.code}, reason=${event.reason || "无"}`, event.code === 1000 ? "info" : "error");
+        if (!state.manualDisconnect && state.accessToken) scheduleReconnect();
+      };
+    });
+  }
+  function scheduleWebSocketRefresh() {
+    clearTimeout(state.websocketRefreshTimer);
+    const exp = tokenExpiry(state.websocketConfig?.token || "");
+    if (!exp) return;
+    const delay = Math.max(1000, (exp - nowSeconds() - 30) * 1000);
+    state.websocketRefreshTimer = setTimeout(() => renewWebSocket("WS Token 即将到期").catch(handleError), delay);
+  }
+  function scheduleReconnect() {
+    clearTimeout(state.reconnectTimer);
+    state.reconnectTimer = setTimeout(() => renewWebSocket("断线重连").catch(handleError), 2000);
+  }
+  function startHeartbeat() {
+    stopHeartbeat();
+    const send = () => {
+      const ws = state.websocket;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const message = { id: `hb-${Date.now()}`, message_type: "ping", content: "", create_at: new Date().toISOString(), priority: "normal" };
+      ws.send(JSON.stringify(message));
+      state.heartbeatSentCount++;
+      log(message, "out", "heartbeat");
+      updateUI();
+    };
+    send();
+    state.heartbeatTimer = setInterval(send, 20000);
+  }
+  function stopHeartbeat() { clearInterval(state.heartbeatTimer); state.heartbeatTimer = null; }
+  function disconnect() {
+    state.manualDisconnect = true;
+    clearTimeout(state.websocketRefreshTimer);
+    clearTimeout(state.reconnectTimer);
+    stopHeartbeat();
+    if (state.websocket) state.websocket.close(1000, "manual disconnect");
+    state.websocket = null;
+    updateUI();
+  }
+  function clearSession() {
+    disconnect();
+    clearTimeout(state.accessRefreshTimer);
+    state.accessToken = "";
+    state.refreshToken = "";
+    state.currentUser = null;
+    state.websocketConfig = null;
+    state.heartbeatSentCount = 0;
+    state.businessMessageCount = 0;
+    state.heartbeatResponseCount = 0;
+    updateUI();
+    log("本地会话已清除");
+  }
+
+  function currentScope() {
+    const config = readConfig();
+    return [config.tenantId, config.platformId, config.agentLineId, config.regionCode].join(":");
+  }
+  function loadAccountPool() {
+    try {
+      const value = JSON.parse(localStorage.getItem(ACCOUNT_POOL_STORAGE_KEY) || "[]");
+      state.accountPool = Array.isArray(value) ? value.filter(item => item && item.account && item.password && item.scope) : [];
+    } catch (_) {
+      state.accountPool = [];
+    }
+  }
+  function saveAccountPool() {
+    localStorage.setItem(ACCOUNT_POOL_STORAGE_KEY, JSON.stringify(state.accountPool));
+  }
+  function scopedAccountPool() {
+    const scope = currentScope();
+    return state.accountPool.filter(item => item.scope === scope);
+  }
+  function poolDeviceID(prefix, index) {
+    return `${prefix}-${String(index).padStart(4, "0")}`;
+  }
+  function poolAccount(prefix, index) {
+    return `${prefix}${String(index).padStart(4, "0")}`;
+  }
+  function positiveInteger(id, min, max) {
+    const value = Number.parseInt($(id).value, 10);
+    if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${$(id).previousElementSibling?.textContent || id} 必须在 ${min}-${max} 之间`);
+    return value;
+  }
+  async function runWorkers(items, concurrency, worker) {
+    let cursor = 0;
+    const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+      while (cursor < items.length) {
+        const index = cursor++;
+        await worker(items[index], index);
+      }
+    });
+    await Promise.all(runners);
+  }
+  async function registerPoolAccount(job) {
+    try {
+      return await authenticateAccount({
+        account: job.account,
+        password: job.password,
+        deviceId: job.deviceId,
+        loginType: "LOGIN_TYPE_REGISTER",
+        nickname: `WsDebug${String(job.index).padStart(4, "0")}`
+      });
+    } catch (registerError) {
+      try {
+        const response = await authenticateAccount(job);
+        log(`账号 ${job.account} 已存在，已通过登录校验并加入账号池`);
+        return response;
+      } catch (_) {
+        throw registerError;
+      }
+    }
+  }
+  async function createAccountPool() {
+    if (state.poolRunning) return;
+    const config = readConfig();
+    validateConfig(config);
+    const prefix = $("poolPrefix").value.trim().toLowerCase();
+    const password = $("poolPassword").value;
+    const count = positiveInteger("poolCount", 1, 100);
+    const concurrency = positiveInteger("poolConcurrency", 1, 10);
+    if (!/^[a-z0-9]+$/.test(prefix)) throw new Error("账号前缀只能包含小写字母和数字");
+    if (!password) throw new Error("请输入测试账号的统一密码");
+    if (!confirm(`确认在平台 ${config.platformId} 创建/补齐 ${count} 个测试玩家？\n账号将持久化，不会在断开 WS 后自动删除。`)) return;
+    const scope = currentScope();
+    const existing = new Map(scopedAccountPool().map(item => [item.account, item]));
+    const jobs = [];
+    for (let index = 1; index <= count; index++) {
+      const account = poolAccount(prefix, index);
+      if (!existing.has(account)) jobs.push({ index, account, password, deviceId: poolDeviceID(prefix, index), scope });
+    }
+    state.poolRunning = true;
+    state.poolCreated = 0;
+    state.poolFailed = 0;
+    updatePoolUI();
+    log(`账号池开始：目标=${count}，待创建/校验=${jobs.length}，并发=${concurrency}`);
+    try {
+      await runWorkers(jobs, concurrency, async job => {
+        try {
+          const response = await registerPoolAccount(job);
+          const access = base64URLToObject(response.token || "");
+          const entry = { ...job, playerId: response.current_user?.player_id || access.player_id || "", userId: access.uid || access.sub || "", createdAt: new Date().toISOString() };
+          state.accountPool = state.accountPool.filter(item => !(item.scope === scope && item.account === job.account));
+          state.accountPool.push(entry);
+          saveAccountPool();
+          state.poolCreated++;
+        } catch (error) {
+          state.poolFailed++;
+          log(`账号 ${job.account} 创建失败：${error.message || error}`, "error");
+        }
+        updatePoolUI();
+      });
+      log(`账号池处理完成：成功=${state.poolCreated}，失败=${state.poolFailed}，当前可用=${scopedAccountPool().length}`, state.poolFailed ? "error" : "in");
+    } finally {
+      state.poolRunning = false;
+      $("poolPassword").value = "Aa123456";
+      updatePoolUI();
+    }
+  }
+  function exportAccountPool() {
+    const accounts = scopedAccountPool();
+    if (!accounts.length) throw new Error("当前环境没有可导出的账号");
+    const payload = { version: 1, scope: currentScope(), exportedAt: new Date().toISOString(), accounts };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `apex-ws-account-pool-${$("platformId").value.trim()}-${Date.now()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    log(`已导出 ${accounts.length} 个测试账号`);
+  }
+  async function importAccountPool(file) {
+    const payload = JSON.parse(await file.text());
+    const accounts = Array.isArray(payload) ? payload : payload.accounts;
+    if (!Array.isArray(accounts)) throw new Error("账号池文件格式不正确");
+    let imported = 0;
+    for (const item of accounts) {
+      if (!item?.account || !item?.password || !item?.deviceId) continue;
+      const normalized = { ...item, scope: item.scope || payload.scope || currentScope() };
+      state.accountPool = state.accountPool.filter(existing => !(existing.scope === normalized.scope && existing.account === normalized.account));
+      state.accountPool.push(normalized);
+      imported++;
+    }
+    saveAccountPool();
+    updatePoolUI();
+    log(`已导入 ${imported} 个测试账号`, "in");
+  }
+  function clearLocalAccountPool() {
+    const scoped = scopedAccountPool();
+    if (!scoped.length) return;
+    if (!confirm(`确认从浏览器删除当前环境的 ${scoped.length} 个账号记录？\n这不会删除服务器中的玩家。`)) return;
+    const scope = currentScope();
+    state.accountPool = state.accountPool.filter(item => item.scope !== scope);
+    saveAccountPool();
+    updatePoolUI();
+    log("已清除当前环境的本地账号池");
+  }
+  function setBatchTab(tab) {
+    const showPool = tab !== "connections";
+    $("accountPoolTabPanel").hidden = !showPool;
+    $("batchConnectionTabPanel").hidden = showPool;
+    $("accountPoolTabBtn").classList.toggle("active", showPool);
+    $("batchConnectionTabBtn").classList.toggle("active", !showPool);
+    $("accountPoolTabBtn").setAttribute("aria-selected", String(showPool));
+    $("batchConnectionTabBtn").setAttribute("aria-selected", String(!showPool));
+  }
+  function updatePoolUI() {
+    const accounts = scopedAccountPool().sort((a, b) => a.account.localeCompare(b.account));
+    $("poolSize").textContent = String(accounts.length);
+    $("poolCreated").textContent = String(state.poolCreated);
+    $("poolFailed").textContent = String(state.poolFailed);
+    $("createPoolBtn").disabled = state.poolRunning;
+    $("createPoolBtn").textContent = state.poolRunning ? "正在创建…" : "创建/补齐账号池";
+    $("exportPoolBtn").disabled = !accounts.length;
+    $("clearPoolBtn").disabled = !accounts.length || state.poolRunning;
+    $("accountPoolTabBtn").textContent = `账号池管理（${accounts.length}）`;
+    $("poolList").innerHTML = accounts.length
+      ? accounts.slice(0, 100).map((item, index) => `<div class="pool-row"><span>${index + 1}</span><span>${escapeHTML(item.account)}</span><span>${escapeHTML(item.playerId || "未记录 Player ID")}</span></div>`).join("")
+      : `<div class="pool-row"><span>—</span><span>当前环境暂无账号</span><span>—</span></div>`;
+  }
+
+  async function refreshBatchAccess(client) {
+    if (client.accessRefreshPromise) return client.accessRefreshPromise;
+    client.accessRefreshPromise = scopedApiRequest(PATHS.refresh, {
+      method: "POST", body: { refresh_token: client.refreshToken }, deviceId: client.deviceId
+    }).then(response => {
+      if (!response.token) throw new Error("刷新响应缺少 Access Token");
+      client.accessToken = response.token;
+      if (response.refresh_token) client.refreshToken = response.refresh_token;
+    }).finally(() => { client.accessRefreshPromise = null; });
+    return client.accessRefreshPromise;
+  }
+  async function fetchBatchWebSocketConfig(client) {
+    if (tokenExpiry(client.accessToken) - nowSeconds() <= 90) await refreshBatchAccess(client);
+    const response = await scopedApiRequest(PATHS.websocketConfig, { accessToken: client.accessToken, deviceId: client.deviceId });
+    if (!response.websocket?.url || !response.websocket?.token) throw new Error("WebSocket 配置响应不完整");
+    client.websocketConfig = response.websocket;
+    client.renewAt = tokenExpiry(response.websocket.token) - 30 - Math.floor(Math.random() * 16);
+    return response.websocket;
+  }
+  function batchEventID(value) {
+    if (!value || typeof value !== "object") return "";
+    let metadata = value.metadata;
+    if (typeof metadata === "string") {
+      try { metadata = JSON.parse(metadata); } catch (_) { metadata = null; }
+    }
+    return String(value.message_id || value.id || metadata?.message_id || metadata?.event || value.biz_id || "");
+  }
+  function recordBatchMessage(client, value) {
+    const messageType = value && typeof value === "object" ? String(value.message_type || "").toLowerCase() : "";
+    if (messageType === "pong") {
+      client.pong++;
+      return;
+    }
+    if (messageType === "ping") return;
+    client.business++;
+    const eventID = batchEventID(value) || `unknown-${Date.now()}`;
+    if (!state.batchEvents.has(eventID)) state.batchEvents.set(eventID, new Set());
+    const receivers = state.batchEvents.get(eventID);
+    const firstReceipt = receivers.size === 0;
+    receivers.add(client.account);
+    state.latestBatchEventID = eventID;
+    if (firstReceipt) log(`[批量连接] 收到业务消息 ${eventID}\n${formatJSON(value)}`, "in", "business");
+  }
+  function connectBatchSocket(client, config) {
+    return new Promise((resolve, reject) => {
+      const previous = client.socket;
+      const socket = new WebSocket(websocketURL(config));
+      let settled = false;
+      client.status = "connecting";
+      updateBatchUI();
+      socket.onopen = () => {
+        settled = true;
+        client.socket = socket;
+        client.status = "online";
+        client.nextHeartbeatAt = Date.now() + Math.floor(Math.random() * 20000);
+        client.nextRetryAt = 0;
+        if (previous && previous !== socket) {
+          previous.onclose = null;
+          previous.close(1000, "token renewed");
+        }
+        updateBatchUI();
+        resolve();
+      };
+      socket.onmessage = event => {
+        let value = event.data;
+        try { value = JSON.parse(event.data); } catch (_) {}
+        recordBatchMessage(client, value);
+        updateBatchUI();
+      };
+      socket.onerror = () => {
+        if (!settled) reject(new Error("WebSocket 握手失败"));
+      };
+      socket.onclose = event => {
+        if (!settled) reject(new Error(`WebSocket 连接关闭：${event.code} ${event.reason || ""}`));
+        if (client.socket !== socket) return;
+        client.socket = null;
+        client.status = state.batchRunning ? "offline" : "stopped";
+        client.nextRetryAt = Date.now() + 2000 + Math.floor(Math.random() * 3000);
+        updateBatchUI();
+      };
+    });
+  }
+  async function renewBatchClient(client) {
+    if (client.renewPromise || !state.batchRunning) return client.renewPromise;
+    client.renewPromise = (async () => {
+      const config = await fetchBatchWebSocketConfig(client);
+      await connectBatchSocket(client, config);
+    })().catch(error => {
+      client.status = "offline";
+      client.lastError = error.message || String(error);
+      client.nextRetryAt = Date.now() + 5000;
+      throw error;
+    }).finally(() => { client.renewPromise = null; updateBatchUI(); });
+    return client.renewPromise;
+  }
+  async function startBatchClient(account) {
+    const client = {
+      ...account, status: "authenticating", accessToken: "", refreshToken: "", websocketConfig: null,
+      socket: null, sent: 0, business: 0, pong: 0, renewAt: 0, nextHeartbeatAt: 0, nextRetryAt: 0,
+      accessRefreshPromise: null, renewPromise: null, lastError: ""
+    };
+    state.batchClients.set(account.account, client);
+    updateBatchUI();
+    const response = await authenticateAccount(client);
+    client.accessToken = response.token || "";
+    client.refreshToken = response.refresh_token || "";
+    if (!client.accessToken || !client.refreshToken) throw new Error("登录响应缺少 Token");
+    if (!state.batchRunning) {
+      client.status = "stopped";
+      return;
+    }
+    await renewBatchClient(client);
+  }
+  function maintainBatchClients() {
+    if (!state.batchRunning) return;
+    const now = Date.now();
+    for (const client of state.batchClients.values()) {
+      if (client.status === "online" && client.socket?.readyState === WebSocket.OPEN && now >= client.nextHeartbeatAt) {
+        client.socket.send(JSON.stringify({ id: `hb-${Date.now()}-${client.account}`, message_type: "ping", content: "", create_at: new Date().toISOString(), priority: "normal" }));
+        client.sent++;
+        client.nextHeartbeatAt = now + 20000;
+      }
+      if (client.renewPromise) continue;
+      if (client.renewAt && nowSeconds() >= client.renewAt) renewBatchClient(client).catch(error => log(`[批量续期] ${client.account}: ${error.message || error}`, "error"));
+      else if (client.status === "offline" && client.nextRetryAt && now >= client.nextRetryAt) renewBatchClient(client).catch(() => {});
+    }
+    updateBatchUI();
+  }
+  async function connectAccountPool() {
+    if (state.batchRunning) return;
+    const count = positiveInteger("batchCount", 1, 100);
+    const concurrency = positiveInteger("batchConcurrency", 1, 10);
+    const accounts = scopedAccountPool().sort((a, b) => a.account.localeCompare(b.account)).slice(0, count);
+    if (accounts.length < count) throw new Error(`当前账号池仅有 ${accounts.length} 个账号，请先创建或导入 ${count} 个账号`);
+    setDebugMode("batch");
+    setBatchTab("connections");
+    disconnectAccountPool(false);
+    state.batchClients = new Map();
+    state.batchEvents = new Map();
+    state.latestBatchEventID = "";
+    state.batchFailed = 0;
+    state.batchRunning = true;
+    state.batchMaintenanceTimer = setInterval(maintainBatchClients, 1000);
+    updateBatchUI();
+    log(`批量连接开始：账号=${accounts.length}，并发=${concurrency}`);
+    await runWorkers(accounts, concurrency, async account => {
+      try {
+        await startBatchClient(account);
+      } catch (error) {
+        const client = state.batchClients.get(account.account);
+        if (client) {
+          client.status = "failed";
+          client.lastError = error.message || String(error);
+        }
+        state.batchFailed++;
+        log(`[批量连接] ${account.account} 失败：${error.message || error}`, "error");
+        updateBatchUI();
+      }
+    });
+    log(`批量连接启动完成：在线=${batchOnlineCount()}，失败=${state.batchFailed}`, state.batchFailed ? "error" : "in");
+  }
+  function disconnectAccountPool(writeLog = true) {
+    state.batchRunning = false;
+    clearInterval(state.batchMaintenanceTimer);
+    state.batchMaintenanceTimer = null;
+    for (const client of state.batchClients.values()) {
+      client.status = "stopped";
+      if (client.socket) {
+        client.socket.onclose = null;
+        client.socket.close(1000, "batch stopped");
+        client.socket = null;
+      }
+    }
+    updateBatchUI();
+    if (writeLog) log("已断开全部批量 WebSocket 连接");
+  }
+  function batchOnlineCount() {
+    return Array.from(state.batchClients.values()).filter(client => client.status === "online" && client.socket?.readyState === WebSocket.OPEN).length;
+  }
+  function updateBatchUI() {
+    const clients = Array.from(state.batchClients.values());
+    const connecting = clients.filter(client => ["authenticating", "connecting"].includes(client.status)).length;
+    $("batchOnline").textContent = String(batchOnlineCount());
+    $("batchConnecting").textContent = String(connecting);
+    $("batchFailed").textContent = String(state.batchFailed);
+    const heartbeatSent = clients.reduce((sum, client) => sum + client.sent, 0);
+    const heartbeatPong = clients.reduce((sum, client) => sum + client.pong, 0);
+    $("batchHeartbeatStats").textContent = `${heartbeatSent} / ${heartbeatPong}`;
+    $("batchBusiness").textContent = String(clients.reduce((sum, client) => sum + client.business, 0));
+    const coverage = state.batchEvents.get(state.latestBatchEventID);
+    $("batchCoverage").textContent = coverage ? `${coverage.size}/${clients.length}` : "—";
+    $("batchConnectBtn").disabled = state.batchRunning || state.poolRunning;
+    $("batchConnectBtn").textContent = state.batchRunning ? "批量连接运行中" : "批量登录并连接";
+    $("batchDisconnectBtn").disabled = !state.batchRunning && !clients.some(client => client.socket);
+    const configuredTarget = Number.parseInt($("batchCount").value, 10) || 0;
+    const target = clients.length || configuredTarget;
+    $("batchConnectionTabBtn").textContent = `批量连接（${batchOnlineCount()}/${target}）`;
+    updateModeIndicators();
+  }
+
+  function updateUserInfo() {
+    const access = base64URLToObject(state.accessToken);
+    const ws = base64URLToObject(state.websocketConfig?.token || "");
+    const user = state.currentUser || {};
+    const rows = [
+      ["账号", user.account || $("account").value.trim()],
+      ["Player ID", user.player_id || access.player_id],
+      ["User ID", access.uid || access.sub || ws.uid],
+      ["昵称", user.nickname],
+      ["VIP 等级", user.vip_level ?? ""],
+      ["Tenant / Namespace", ws.tid || access.tid || $("tenantId").value],
+      ["Platform / Group", ws.gid || access.pid || $("platformId").value],
+      ["Agent Line", access.aid || $("agentLineId").value],
+      ["Region", access.rc || access.rcd || $("regionCode").value],
+      ["Device ID", ws.did || access.did || $("deviceId").value],
+      ["WS URL", state.websocketConfig?.url || ""]
+    ];
+    $("userInfo").innerHTML = rows.map(([key, value]) => `<dt>${escapeHTML(String(key))}</dt><dd>${escapeHTML(value === undefined || value === null || value === "" ? "—" : String(value))}</dd>`).join("");
+  }
+  function escapeHTML(value) {
+    return value.replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
+  }
+  function setDebugMode(mode) {
+    const showSingle = mode !== "batch";
+    state.debugMode = showSingle ? "single" : "batch";
+    $("singleDebugModePanel").hidden = !showSingle;
+    $("batchDebugModePanel").hidden = showSingle;
+    $("singleDebugTabBtn").classList.toggle("active", showSingle);
+    $("batchDebugTabBtn").classList.toggle("active", !showSingle);
+    $("singleDebugTabBtn").setAttribute("aria-selected", String(showSingle));
+    $("batchDebugTabBtn").setAttribute("aria-selected", String(!showSingle));
+    updateModeIndicators();
+  }
+  function updateModeIndicators() {
+    const wsState = state.websocket?.readyState;
+    const singleText = wsState === WebSocket.OPEN ? "已连接" : wsState === WebSocket.CONNECTING ? "连接中" : "未连接";
+    const batchOnline = batchOnlineCount();
+    const batchClients = state.batchClients.size;
+    const configuredTarget = Number.parseInt($("batchCount").value, 10) || 0;
+    const batchTarget = batchClients || configuredTarget;
+    $("singleDebugTabBtn").textContent = `单个调试（${singleText}）`;
+    $("batchDebugTabBtn").textContent = `批量调试（${batchOnline}/${batchTarget}）`;
+
+    if (state.debugMode === "batch") {
+      $("sessionBadge").textContent = `批量 WS · ${batchOnline}/${batchTarget}`;
+      $("sessionBadge").className = `badge ${batchTarget > 0 && batchOnline === batchTarget ? "ok" : state.batchRunning || batchOnline > 0 ? "warn" : ""}`;
+      return;
+    }
+    const loggedIn = Boolean(state.accessToken);
+    const wsOpen = wsState === WebSocket.OPEN;
+    $("sessionBadge").textContent = loggedIn ? (wsOpen ? "已登录 · WS在线" : "已登录 · WS离线") : "未登录";
+    $("sessionBadge").className = `badge ${wsOpen ? "ok" : loggedIn ? "warn" : ""}`;
+  }
+  function updateUI() {
+    const loggedIn = Boolean(state.accessToken);
+    const wsOpen = state.websocket?.readyState === WebSocket.OPEN;
+    $("refreshBtn").disabled = !loggedIn;
+    $("wsRefreshBtn").disabled = !loggedIn;
+    $("disconnectBtn").disabled = !state.websocket;
+    $("wsState").textContent = wsOpen ? "已连接" : state.websocket?.readyState === WebSocket.CONNECTING ? "连接中" : "未连接";
+    $("heartbeatStats").textContent = `${state.heartbeatSentCount} / ${state.heartbeatResponseCount}`;
+    $("businessMessageCount").textContent = String(state.businessMessageCount);
+    updateModeIndicators();
+    updateCountdowns();
+    updateUserInfo();
+  }
+  function updateCountdowns() {
+    $("accessCountdown").textContent = formatRemaining(tokenExpiry(state.accessToken));
+    $("wsCountdown").textContent = formatRemaining(tokenExpiry(state.websocketConfig?.token || ""));
+  }
+  function setBusy(busy) {
+    $("loginBtn").disabled = busy;
+    $("loginBtn").textContent = busy ? "处理中…" : "登录并连接 WS";
+  }
+  function handleError(error) {
+    console.error(error);
+    log(error?.message || String(error), "error");
+    updateUI();
+  }
+  async function run(action) {
+    try { await action(); } catch (error) { handleError(error); } finally { setBusy(false); }
+  }
+
+  async function copyLogs() {
+    const text = $("log").innerText.trim();
+    if (!text) {
+      const button = $("copyLogBtn");
+      button.textContent = state.businessLogOnly ? "暂无业务日志" : "暂无日志";
+      setTimeout(() => { button.textContent = "复制日志"; }, 1500);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (_) {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand("copy");
+      textarea.remove();
+      if (!copied) throw new Error("浏览器拒绝访问剪贴板");
+    }
+    const button = $("copyLogBtn");
+    button.textContent = "已复制";
+    setTimeout(() => { button.textContent = "复制日志"; }, 1500);
+  }
+
+  function toggleBusinessLogFilter() {
+    state.businessLogOnly = !state.businessLogOnly;
+    $("log").classList.toggle("business-only", state.businessLogOnly);
+    const button = $("businessLogFilterBtn");
+    button.textContent = state.businessLogOnly ? "显示全部日志" : "仅看业务消息";
+    button.classList.toggle("primary", state.businessLogOnly);
+  }
+
+  $("loginBtn").addEventListener("click", () => run(login));
+  $("refreshBtn").addEventListener("click", () => run(refreshAccessToken));
+  $("wsRefreshBtn").addEventListener("click", () => run(() => renewWebSocket("手动刷新")));
+  $("disconnectBtn").addEventListener("click", disconnect);
+  $("clearSessionBtn").addEventListener("click", clearSession);
+  $("copyLogBtn").addEventListener("click", () => copyLogs().catch(handleError));
+  $("businessLogFilterBtn").addEventListener("click", toggleBusinessLogFilter);
+  $("clearLogBtn").addEventListener("click", () => { $("log").innerHTML = ""; });
+  $("createPoolBtn").addEventListener("click", () => run(createAccountPool));
+  $("exportPoolBtn").addEventListener("click", () => run(exportAccountPool));
+  $("importPoolBtn").addEventListener("click", () => $("poolFileInput").click());
+  $("poolFileInput").addEventListener("change", event => {
+    const file = event.target.files?.[0];
+    if (file) run(() => importAccountPool(file));
+    event.target.value = "";
+  });
+  $("clearPoolBtn").addEventListener("click", clearLocalAccountPool);
+  $("batchConnectBtn").addEventListener("click", () => run(connectAccountPool));
+  $("batchDisconnectBtn").addEventListener("click", () => disconnectAccountPool());
+  $("singleDebugTabBtn").addEventListener("click", () => setDebugMode("single"));
+  $("batchDebugTabBtn").addEventListener("click", () => setDebugMode("batch"));
+  $("accountPoolTabBtn").addEventListener("click", () => setBatchTab("pool"));
+  $("batchConnectionTabBtn").addEventListener("click", () => setBatchTab("connections"));
+  for (const id of formIDs) $(id).addEventListener("change", () => { saveConfig(); updatePoolUI(); updateBatchUI(); });
+  window.addEventListener("beforeunload", () => { disconnect(); disconnectAccountPool(false); });
+
+  restoreConfig();
+  loadAccountPool();
+  setDebugMode("single");
+  state.countdownTimer = setInterval(updateCountdowns, 1000);
+  updateUI();
+  updatePoolUI();
+  updateBatchUI();
+  log("调试台已就绪。请填写环境配置、账号和密码后登录。");
+})();
+</script>
+</body>
+</html>
