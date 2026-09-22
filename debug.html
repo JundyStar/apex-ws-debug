@@ -28,7 +28,7 @@
     h1 { font-size: 21px; }
     h2 { font-size: 15px; margin-bottom: 12px; }
     .subtitle, .muted { color: var(--muted); }
-    .grid { display: grid; grid-template-columns: minmax(620px, 1.2fr) minmax(420px, .8fr); gap: 16px; }
+    .grid { display: grid; grid-template-columns: minmax(480px, .78fr) minmax(680px, 1.22fr); gap: 16px; }
     .column { display: grid; gap: 16px; align-content: start; }
     .panel { background: color-mix(in srgb, var(--panel) 94%, transparent); border: 1px solid var(--line); border-radius: 14px; padding: 16px; box-shadow: 0 14px 35px rgba(0,0,0,.18); }
     .fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
@@ -109,7 +109,7 @@
     .delivery-pill.late { color: var(--blue); }
     .delivery-pill.missing { color: var(--red); }
     .delivery-pill.not-connected { color: var(--muted); }
-    @media (max-width: 1050px) { .grid { grid-template-columns: 1fr; } .log { height: 420px; } }
+    @media (max-width: 1200px) { .grid { grid-template-columns: 1fr; } .log { height: 420px; } }
     @media (max-width: 680px) { .fields, .status-row, .delivery .status-row, .delivery-controls { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -233,13 +233,15 @@
         </div>
         <div class="status-row" style="margin-top:12px">
           <div class="status"><div id="batchOnline" class="value">0</div><div class="label">当前在线</div></div>
-          <div class="status"><div id="batchConnecting" class="value">0</div><div class="label">正在连接</div></div>
+          <div class="status"><div id="batchConnecting" class="value">0</div><div class="label">建立连接中</div></div>
+          <div class="status"><div id="batchRenewing" class="value">0</div><div class="label">Token 换新中（仍在线）</div></div>
           <div class="status"><div id="batchFailed" class="value">0</div><div class="label">连接失败</div></div>
           <div class="status"><div id="batchHeartbeatStats" class="value">0 / 0</div><div class="label">心跳发送 / 响应</div></div>
           <div class="status"><div id="batchBusiness" class="value">0</div><div class="label">收到业务消息</div></div>
           <div class="status"><div id="batchCoverage" class="value">—</div><div class="label">最新业务消息覆盖</div></div>
+          <div class="status"><div id="batchFirstConnectedAt" class="value">—</div><div class="label">本批首次连接</div></div>
         </div>
-        <div class="hint">每个账号只建立 1 条连接，不会触发“同一用户最多 3 条连接”的挤下线规则。WS Token 会分散到期前自动换新。</div>
+        <div class="hint">每个账号只保留 1 条正式连接，不会触发“同一用户最多 3 条连接”的挤下线规则。WS Token 会分散提前换新，换新期间旧连接继续计为在线。</div>
 
         </div>
       </section>
@@ -910,7 +912,7 @@
     const response = await scopedApiRequest(PATHS.websocketConfig, { accessToken: client.accessToken, deviceId: client.deviceId });
     if (!response.websocket?.url || !response.websocket?.token) throw new Error("WebSocket 配置响应不完整");
     client.websocketConfig = response.websocket;
-    client.renewAt = tokenExpiry(response.websocket.token) - 30 - Math.floor(Math.random() * 16);
+    client.renewAt = tokenExpiry(response.websocket.token) - 30 - Math.floor(Math.random() * 61);
     return response.websocket;
   }
   function parseObject(value) {
@@ -952,7 +954,7 @@
     const receivedAt = Date.now();
     if (!record) {
       const onlineAccounts = new Set(Array.from(state.batchClients.values())
-        .filter(item => item.status === "online" && item.socket?.readyState === WebSocket.OPEN)
+        .filter(item => item.socket?.readyState === WebSocket.OPEN)
         .map(item => item.account));
       record = {
         id: eventID,
@@ -1028,7 +1030,8 @@
     }
   }
   function currentClientState(client) {
-    if (client.status === "online" && client.socket?.readyState === WebSocket.OPEN) return "在线";
+    if (client.socket?.readyState === WebSocket.OPEN && client.renewing) return "在线 · Token换新中";
+    if (client.socket?.readyState === WebSocket.OPEN) return "在线";
     if (client.status === "queued") return "等待连接";
     if (["authenticating", "connecting"].includes(client.status)) return "连接中";
     if (client.status === "failed") return "失败";
@@ -1123,14 +1126,17 @@
   function connectBatchSocket(client, config) {
     return new Promise((resolve, reject) => {
       const previous = client.socket;
+      const previousIsOpen = previous?.readyState === WebSocket.OPEN;
       const socket = new WebSocket(websocketURL(config));
       let settled = false;
-      client.status = "connecting";
+      client.renewing = previousIsOpen;
+      if (!previousIsOpen) client.status = "connecting";
       updateBatchUI();
       socket.onopen = () => {
         settled = true;
         client.socket = socket;
         client.status = "online";
+        client.renewing = false;
         const connectedAt = Date.now();
         if (!client.firstConnectedAt) client.firstConnectedAt = connectedAt;
         client.lastConnectedAt = connectedAt;
@@ -1158,6 +1164,7 @@
         if (client.socket !== socket) return;
         client.socket = null;
         client.status = state.batchRunning ? "offline" : "stopped";
+        client.renewing = false;
         client.disconnectedAt = Date.now();
         client.nextRetryAt = Date.now() + 2000 + Math.floor(Math.random() * 3000);
         updateBatchUI();
@@ -1166,13 +1173,18 @@
   }
   async function renewBatchClient(client) {
     if (client.renewPromise || !state.batchRunning) return client.renewPromise;
+    if (client.socket?.readyState === WebSocket.OPEN) client.renewing = true;
+    updateBatchUI();
     client.renewPromise = (async () => {
       const config = await fetchBatchWebSocketConfig(client);
       await connectBatchSocket(client, config);
     })().catch(error => {
-      client.status = "offline";
+      const previousStillOpen = client.socket?.readyState === WebSocket.OPEN;
+      client.renewing = false;
+      client.status = previousStillOpen ? "online" : "offline";
       client.lastError = error.message || String(error);
       client.nextRetryAt = Date.now() + 5000;
+      if (previousStillOpen) client.renewAt = nowSeconds() + 5 + Math.floor(Math.random() * 6);
       throw error;
     }).finally(() => { client.renewPromise = null; updateBatchUI(); });
     return client.renewPromise;
@@ -1181,7 +1193,7 @@
     return {
       ...account, status: "queued", accessToken: "", refreshToken: "", websocketConfig: null,
       socket: null, sent: 0, business: 0, pong: 0, renewAt: 0, nextHeartbeatAt: 0, nextRetryAt: 0,
-      firstConnectedAt: 0, lastConnectedAt: 0, disconnectedAt: 0,
+      firstConnectedAt: 0, lastConnectedAt: 0, disconnectedAt: 0, renewing: false,
       accessRefreshPromise: null, renewPromise: null, lastError: ""
     };
   }
@@ -1204,7 +1216,7 @@
     if (!state.batchRunning) return;
     const now = Date.now();
     for (const client of state.batchClients.values()) {
-      if (client.status === "online" && client.socket?.readyState === WebSocket.OPEN && now >= client.nextHeartbeatAt) {
+      if (client.socket?.readyState === WebSocket.OPEN && now >= client.nextHeartbeatAt) {
         client.socket.send(JSON.stringify({ id: `hb-${Date.now()}-${client.account}`, message_type: "ping", content: "", create_at: new Date().toISOString(), priority: "normal" }));
         client.sent++;
         client.nextHeartbeatAt = now + 20000;
@@ -1257,6 +1269,7 @@
     state.batchMaintenanceTimer = null;
     for (const client of state.batchClients.values()) {
       client.status = "stopped";
+      client.renewing = false;
       if (client.socket && client.firstConnectedAt) client.disconnectedAt = Date.now();
       if (client.socket) {
         client.socket.onclose = null;
@@ -1268,7 +1281,7 @@
     if (writeLog) log("已断开全部批量 WebSocket 连接");
   }
   function batchOnlineCount() {
-    return Array.from(state.batchClients.values()).filter(client => client.status === "online" && client.socket?.readyState === WebSocket.OPEN).length;
+    return Array.from(state.batchClients.values()).filter(client => client.socket?.readyState === WebSocket.OPEN).length;
   }
   function setStatusTone(valueID, tone = "") {
     const status = $(valueID).closest(".status");
@@ -1277,11 +1290,14 @@
   function updateBatchUI() {
     const clients = Array.from(state.batchClients.values());
     const connecting = clients.filter(client => ["queued", "authenticating", "connecting"].includes(client.status)).length;
+    const renewing = clients.filter(client => client.renewing && client.socket?.readyState === WebSocket.OPEN).length;
     $("batchOnline").textContent = String(batchOnlineCount());
     $("batchConnecting").textContent = String(connecting);
+    $("batchRenewing").textContent = String(renewing);
     $("batchFailed").textContent = String(state.batchFailed);
     setStatusTone("batchOnline", clients.length && batchOnlineCount() === clients.length ? "good" : state.batchRunning ? "warn" : "");
     setStatusTone("batchConnecting", connecting > 0 ? "warn" : "");
+    setStatusTone("batchRenewing", renewing > 0 ? "warn" : "");
     setStatusTone("batchFailed", state.batchFailed > 0 ? "bad" : clients.length ? "good" : "");
     const heartbeatSent = clients.reduce((sum, client) => sum + client.sent, 0);
     const heartbeatPong = clients.reduce((sum, client) => sum + client.pong, 0);
@@ -1290,6 +1306,8 @@
     const latestEvent = state.batchEvents.get(state.latestBatchEventID);
     const latestStats = deliveryStats(latestEvent);
     $("batchCoverage").textContent = latestEvent ? formatCoverage(latestStats.receivedOnline, latestStats.expected) : "—";
+    const firstConnectedAt = clients.reduce((earliest, client) => client.firstConnectedAt && (!earliest || client.firstConnectedAt < earliest) ? client.firstConnectedAt : earliest, 0);
+    $("batchFirstConnectedAt").textContent = formatDateTime(firstConnectedAt);
     setStatusTone("batchCoverage", !latestEvent ? "" : latestStats.missing > 0 ? "bad" : "good");
     $("batchConnectBtn").disabled = state.batchRunning || state.poolRunning;
     $("batchConnectBtn").textContent = state.batchRunning ? "批量连接运行中" : "批量登录并连接";
