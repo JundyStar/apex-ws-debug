@@ -46,6 +46,11 @@
     button:disabled { opacity: .45; cursor: not-allowed; }
     .status-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
     .status { border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: #0b1728; }
+    button.status { width: 100%; text-align: left; }
+    button.status:hover { border-color: var(--blue); }
+    .status.good { border-color: rgba(53,208,127,.65); background: rgba(53,208,127,.06); }
+    .status.warn { border-color: rgba(245,191,79,.7); background: rgba(245,191,79,.07); }
+    .status.bad { border-color: rgba(255,107,121,.72); background: rgba(255,107,121,.07); }
     .status .value { font-weight: 700; font-size: 16px; color: var(--blue); overflow-wrap: anywhere; }
     .status .label { color: var(--muted); font-size: 11px; margin-top: 3px; }
     .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
@@ -80,7 +85,13 @@
     .mode-switch-label { color: var(--muted); font-size: 12px; font-weight: 600; }
     .mode-stack { display: grid; gap: 16px; }
     .mode-stack[hidden] { display: none; }
+    .environment-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .environment-header h2 { margin-bottom: 0; }
+    .environment-summary { margin-top: 10px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    .environment-summary[hidden], .environment-body[hidden] { display: none; }
+    .output-panel[hidden], .output-tab[hidden] { display: none; }
     .delivery { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+    .output-panel > .delivery { margin-top: 0; padding-top: 0; border-top: 0; }
     .delivery-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
     .delivery-header h3 { margin: 0; font-size: 14px; }
     .delivery-controls { display: grid; grid-template-columns: minmax(200px, 1.4fr) minmax(130px, .7fr) minmax(160px, 1fr) auto; gap: 8px; align-items: end; }
@@ -114,19 +125,25 @@
 
   <div class="grid">
     <div class="column">
-      <section class="panel">
-        <h2>1. 环境配置</h2>
-        <div class="fields">
+      <section id="environmentPanel" class="panel">
+        <div class="environment-header">
+          <h2>1. 环境配置</h2>
+          <button id="environmentToggleBtn" type="button" aria-expanded="true">收起配置</button>
+        </div>
+        <div id="environmentSummary" class="environment-summary" hidden></div>
+        <div id="environmentBody" class="environment-body">
+        <div class="fields" style="margin-top:12px">
           <div class="field wide"><label for="apiBase">客户端网关地址</label><input id="apiBase" placeholder="https://hitgameai.xyz"></div>
-          <div class="field"><label for="tenantId">Tenant ID</label><input id="tenantId" placeholder="upxlkhci"></div>
-          <div class="field"><label for="platformId">Platform ID</label><input id="platformId" placeholder="1r11yyd2"></div>
-          <div class="field"><label for="agentLineId">Agent Line ID</label><input id="agentLineId"></div>
-          <div class="field"><label for="regionCode">Region Code</label><input id="regionCode"></div>
+          <div class="field"><label for="tenantId">Tenant ID</label><input id="tenantId" placeholder="upxlkhci" value="upxlkhci"></div>
+          <div class="field"><label for="platformId">Platform ID</label><input id="platformId" placeholder="1r11yyd2" value="1r11yyd2"></div>
+          <div class="field"><label for="agentLineId">Agent Line ID</label><input id="agentLineId" value="a6yaljmf"></div>
+          <div class="field"><label for="regionCode">Region Code</label><input id="regionCode" value="kh"></div>
           <div class="field"><label for="deviceId">Device ID</label><input id="deviceId"></div>
           <div class="field"><label for="devicePlatform">Device Platform</label><select id="devicePlatform"><option>WEB</option><option>IOS</option><option>ANDROID</option></select></div>
           <div class="field wide"><label for="clientSignatureSecret">客户端请求签名密钥（仅保存在当前页面内存中）</label><input id="clientSignatureSecret" type="password" autocomplete="off" spellcheck="false" placeholder="请输入当前测试环境的签名密钥"></div>
         </div>
         <div class="hint">签名密钥不会保存到 localStorage、账号池或导出文件，页面刷新后需要重新输入。</div>
+        </div>
         <div class="mode-switch">
           <span class="mode-switch-label">2. 选择调试模式</span>
           <div class="tabs" role="tablist" aria-label="调试模式">
@@ -161,6 +178,8 @@
           <div class="status"><div id="wsState" class="value">未连接</div><div class="label">WebSocket 状态</div></div>
           <div class="status"><div id="heartbeatStats" class="value">0 / 0</div><div class="label">心跳发送 / 响应</div></div>
           <div class="status"><div id="businessMessageCount" class="value">0</div><div class="label">收到业务消息（不含心跳）</div></div>
+          <div class="status"><div id="singleFirstConnectedAt" class="value">—</div><div class="label">首次连接时间</div></div>
+          <div class="status"><div id="singleOnlineDuration" class="value">—</div><div class="label">本次在线时长</div></div>
         </div>
       </section>
 
@@ -175,8 +194,8 @@
         <div class="tab-header">
           <h2 style="margin-bottom:0">批量调试</h2>
           <div class="tabs" role="tablist" aria-label="批量调试功能">
-            <button id="accountPoolTabBtn" class="tab-button active" role="tab" aria-selected="true" aria-controls="accountPoolTabPanel">账号池管理（0）</button>
-            <button id="batchConnectionTabBtn" class="tab-button" role="tab" aria-selected="false" aria-controls="batchConnectionTabPanel">批量连接（0/0）</button>
+            <button id="accountPoolTabBtn" class="tab-button active" role="tab" aria-selected="true" aria-controls="accountPoolTabPanel">① 账号池（0）</button>
+            <button id="batchConnectionTabBtn" class="tab-button" role="tab" aria-selected="false" aria-controls="batchConnectionTabPanel">② 批量连接（0/0）</button>
           </div>
         </div>
 
@@ -222,6 +241,20 @@
         </div>
         <div class="hint">每个账号只建立 1 条连接，不会触发“同一用户最多 3 条连接”的挤下线规则。WS Token 会分散到期前自动换新。</div>
 
+        </div>
+      </section>
+      </div>
+    </div>
+
+    <section class="panel">
+      <div class="tab-header">
+        <h2 style="margin-bottom:0">调试输出</h2>
+        <div class="tabs" role="tablist" aria-label="调试输出">
+          <button id="deliveryOutputTabBtn" class="tab-button output-tab" role="tab" aria-selected="false" aria-controls="deliveryOutputPanel" hidden>③ 投递诊断</button>
+          <button id="logOutputTabBtn" class="tab-button active" role="tab" aria-selected="true" aria-controls="logOutputPanel">原始日志</button>
+        </div>
+      </div>
+      <div id="deliveryOutputPanel" class="output-panel" role="tabpanel" aria-labelledby="deliveryOutputTabBtn" hidden>
         <div class="delivery">
           <div class="delivery-header">
             <h3>业务消息投递明细</h3>
@@ -229,30 +262,26 @@
           </div>
           <div class="delivery-controls">
             <div class="field"><label for="deliveryEventSelect">业务消息（最近 20 条）</label><select id="deliveryEventSelect" disabled><option value="">暂无业务消息</option></select></div>
-            <div class="field"><label for="deliveryFilterSelect">接收状态</label><select id="deliveryFilterSelect"><option value="all">全部</option><option value="received">已收到</option><option value="missing">在线未收到</option><option value="not_connected">当时未连接</option><option value="duplicate">重复收到</option></select></div>
+            <div class="field"><label for="deliveryFilterSelect">接收状态</label><select id="deliveryFilterSelect"><option value="all">全部</option><option value="received">在线已收到</option><option value="missing">在线未收到</option><option value="not_connected">当时未连接</option><option value="late">后续收到</option><option value="duplicate">重复收到</option></select></div>
             <div class="field"><label for="deliverySearch">搜索账号 / Player ID / Device ID</label><input id="deliverySearch" placeholder="输入关键字"></div>
           </div>
           <div id="deliveryEventMeta" class="delivery-meta">收到业务消息后，这里会显示每个账号和设备的接收结果。</div>
           <div class="status-row" style="margin-bottom:10px">
-            <div class="status"><div id="deliveryOnlineCoverage" class="value">—</div><div class="label">当时在线送达</div></div>
-            <div class="status"><div id="deliveryMissing" class="value">0</div><div class="label">在线未收到</div></div>
-            <div class="status"><div id="deliveryNotConnected" class="value">0</div><div class="label">当时未连接</div></div>
-            <div class="status"><div id="deliveryDuplicates" class="value">0</div><div class="label">重复收到账号</div></div>
+            <button id="deliveryReceivedCard" class="status" type="button" data-delivery-filter="received"><div id="deliveryOnlineCoverage" class="value">—</div><div class="label">已收到 / 当时在线</div></button>
+            <button id="deliveryMissingCard" class="status" type="button" data-delivery-filter="missing"><div id="deliveryMissing" class="value">0</div><div class="label">在线未收到</div></button>
+            <button id="deliveryNotConnectedCard" class="status" type="button" data-delivery-filter="not_connected"><div id="deliveryNotConnected" class="value">0</div><div class="label">当时未连接</div></button>
+            <button id="deliveryDuplicatesCard" class="status" type="button" data-delivery-filter="duplicate"><div id="deliveryDuplicates" class="value">0</div><div class="label">重复收到账号</div></button>
           </div>
           <div class="table-wrap">
             <div id="deliveryEmpty" class="delivery-empty">暂无可查看的业务消息</div>
             <table id="deliveryTable" hidden>
-              <thead><tr><th>投递状态</th><th>账号</th><th>Player ID</th><th>Device ID</th><th>当前 WS</th><th>首次接收时间</th><th>接收次数</th></tr></thead>
+              <thead><tr><th>投递状态</th><th>账号</th><th>Player ID</th><th>Device ID</th><th>当前 WS</th><th>首次连接</th><th>最近连接</th><th>首次接收</th><th>接收次数</th></tr></thead>
               <tbody id="deliveryTableBody"></tbody>
             </table>
           </div>
         </div>
-        </div>
-      </section>
       </div>
-    </div>
-
-    <section class="panel">
+      <div id="logOutputPanel" class="output-panel" role="tabpanel" aria-labelledby="logOutputTabBtn">
       <div class="log-toolbar">
         <h2>实时日志</h2>
         <div class="actions" style="margin-top:0">
@@ -262,6 +291,7 @@
         </div>
       </div>
       <div id="log" class="log"></div>
+      </div>
     </section>
   </div>
 </div>
@@ -297,6 +327,9 @@
     heartbeatSentCount: 0,
     businessMessageCount: 0,
     heartbeatResponseCount: 0,
+    singleFirstConnectedAt: 0,
+    singleLastConnectedAt: 0,
+    singleDisconnectedAt: 0,
     accountPool: [],
     poolRunning: false,
     poolCreated: 0,
@@ -311,7 +344,10 @@
     selectedBatchEventID: "",
     deliveryRenderScheduled: false,
     businessLogOnly: false,
-    debugMode: "single"
+    debugMode: "single",
+    outputPanel: "log",
+    environmentCollapsed: false,
+    environmentAutoCollapsed: false
   };
 
   const $ = id => document.getElementById(id);
@@ -345,6 +381,22 @@
     const seconds = Math.max(0, exp - nowSeconds());
     const minutes = Math.floor(seconds / 60);
     return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+  }
+  function formatDateTime(timestamp) {
+    if (!timestamp) return "—";
+    return new Date(timestamp).toLocaleString("zh-CN", { hour12: false });
+  }
+  function formatDuration(milliseconds) {
+    if (!Number.isFinite(milliseconds) || milliseconds < 0) return "—";
+    const seconds = Math.floor(milliseconds / 1000);
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remaining = seconds % 60;
+    return hours > 0 ? `${hours}时${minutes}分${remaining}秒` : `${minutes}分${remaining}秒`;
+  }
+  function formatCoverage(received, expected) {
+    if (!expected) return "—";
+    return `${received}/${expected}（${(received * 100 / expected).toFixed(1)}%）`;
   }
   function formatJSON(value) {
     try { return JSON.stringify(value, null, 2); } catch (_) { return String(value); }
@@ -383,6 +435,36 @@
     for (const id of formIDs) if (saved[id]) $(id).value = saved[id];
     if (!$("apiBase").value) $("apiBase").value = "https://hitgameai.xyz";
     if (!$("deviceId").value) $("deviceId").value = `wsdebug-${randomID().slice(0, 16)}`;
+  }
+  function environmentSummaryText() {
+    const config = readConfig();
+    return [config.tenantId || "未设置 Tenant", config.platformId || "未设置 Platform", config.regionCode || "未设置 Region", config.devicePlatform || "未设置设备"].join(" / ");
+  }
+  function updateEnvironmentSummary() {
+    $("environmentSummary").textContent = environmentSummaryText();
+  }
+  function setEnvironmentCollapsed(collapsed) {
+    state.environmentCollapsed = Boolean(collapsed);
+    $("environmentBody").hidden = state.environmentCollapsed;
+    $("environmentSummary").hidden = !state.environmentCollapsed;
+    $("environmentToggleBtn").textContent = state.environmentCollapsed ? "修改配置" : "收起配置";
+    $("environmentToggleBtn").setAttribute("aria-expanded", String(!state.environmentCollapsed));
+    updateEnvironmentSummary();
+  }
+  function autoCollapseEnvironment() {
+    if (state.environmentAutoCollapsed) return;
+    state.environmentAutoCollapsed = true;
+    setEnvironmentCollapsed(true);
+  }
+  function setOutputPanel(panel) {
+    const showDelivery = panel === "delivery" && state.debugMode === "batch";
+    state.outputPanel = showDelivery ? "delivery" : "log";
+    $("deliveryOutputPanel").hidden = !showDelivery;
+    $("logOutputPanel").hidden = showDelivery;
+    $("deliveryOutputTabBtn").classList.toggle("active", showDelivery);
+    $("logOutputTabBtn").classList.toggle("active", !showDelivery);
+    $("deliveryOutputTabBtn").setAttribute("aria-selected", String(showDelivery));
+    $("logOutputTabBtn").setAttribute("aria-selected", String(!showDelivery));
   }
 
   async function hmacSignature(secret, timestamp, rawQuery, body) {
@@ -546,11 +628,16 @@
       socket.onopen = () => {
         settled = true;
         state.websocket = socket;
+        const connectedAt = Date.now();
+        if (!state.singleFirstConnectedAt) state.singleFirstConnectedAt = connectedAt;
+        state.singleLastConnectedAt = connectedAt;
+        state.singleDisconnectedAt = 0;
         if (previous && previous !== socket) {
           previous.onclose = null;
           previous.close(1000, "token renewed");
         }
         startHeartbeat();
+        autoCollapseEnvironment();
         updateUI();
         const claims = base64URLToObject(config.token);
         log(`WebSocket 已连接：namespace=${claims.tid || ""}, group=${claims.gid || ""}, user=${claims.uid || ""}`, "in");
@@ -579,6 +666,7 @@
         if (state.websocket !== socket) return;
         stopHeartbeat();
         state.websocket = null;
+        state.singleDisconnectedAt = Date.now();
         updateUI();
         log(`WebSocket 已断开：code=${event.code}, reason=${event.reason || "无"}`, event.code === 1000 ? "info" : "error");
         if (!state.manualDisconnect && state.accessToken) scheduleReconnect();
@@ -616,6 +704,7 @@
     clearTimeout(state.websocketRefreshTimer);
     clearTimeout(state.reconnectTimer);
     stopHeartbeat();
+    if (state.websocket && state.singleFirstConnectedAt) state.singleDisconnectedAt = Date.now();
     if (state.websocket) state.websocket.close(1000, "manual disconnect");
     state.websocket = null;
     updateUI();
@@ -630,6 +719,9 @@
     state.heartbeatSentCount = 0;
     state.businessMessageCount = 0;
     state.heartbeatResponseCount = 0;
+    state.singleFirstConnectedAt = 0;
+    state.singleLastConnectedAt = 0;
+    state.singleDisconnectedAt = 0;
     updateUI();
     log("本地会话已清除");
   }
@@ -796,7 +888,7 @@
     $("createPoolBtn").textContent = state.poolRunning ? "正在创建…" : "创建/补齐账号池";
     $("exportPoolBtn").disabled = !accounts.length;
     $("clearPoolBtn").disabled = !accounts.length || state.poolRunning;
-    $("accountPoolTabBtn").textContent = `账号池管理（${accounts.length}）`;
+    $("accountPoolTabBtn").textContent = `① 账号池（${accounts.length}）`;
     $("poolList").innerHTML = accounts.length
       ? accounts.slice(0, 100).map((item, index) => `<div class="pool-row"><span>${index + 1}</span><span>${escapeHTML(item.account)}</span><span>${escapeHTML(item.playerId || "未记录 Player ID")}</span></div>`).join("")
       : `<div class="pool-row"><span>—</span><span>当前环境暂无账号</span><span>—</span></div>`;
@@ -911,11 +1003,12 @@
       const receipt = record.receivers.get(client.account);
       const expectedOnline = record.onlineAccounts.has(client.account);
       const deliveryStatus = receipt ? (expectedOnline ? "received" : "late") : expectedOnline ? "missing" : "not_connected";
-      return { client, receipt, deliveryStatus };
+      return { client, receipt, expectedOnline, deliveryStatus };
     }).filter(row => {
-      if (filter === "received" && !row.receipt) return false;
+      if (filter === "received" && row.deliveryStatus !== "received") return false;
       if (filter === "missing" && row.deliveryStatus !== "missing") return false;
-      if (filter === "not_connected" && row.deliveryStatus !== "not_connected") return false;
+      if (filter === "not_connected" && row.expectedOnline) return false;
+      if (filter === "late" && row.deliveryStatus !== "late") return false;
       if (filter === "duplicate" && (!row.receipt || row.receipt.count <= 1)) return false;
       if (!search) return true;
       return [row.client.account, row.client.playerId, row.client.deviceId].some(value => String(value || "").toLowerCase().includes(search));
@@ -976,10 +1069,14 @@
 
     const record = selectedDeliveryRecord();
     const stats = deliveryStats(record);
-    $("deliveryOnlineCoverage").textContent = record ? `${stats.receivedOnline}/${stats.expected}` : "—";
+    $("deliveryOnlineCoverage").textContent = record ? formatCoverage(stats.receivedOnline, stats.expected) : "—";
     $("deliveryMissing").textContent = String(stats.missing);
     $("deliveryNotConnected").textContent = String(stats.notConnected);
     $("deliveryDuplicates").textContent = String(stats.duplicates);
+    $("deliveryReceivedCard").className = `status ${record && stats.missing === 0 ? "good" : record ? "warn" : ""}`;
+    $("deliveryMissingCard").className = `status ${stats.missing > 0 ? "bad" : record ? "good" : ""}`;
+    $("deliveryNotConnectedCard").className = `status ${stats.notConnected > 0 ? "warn" : ""}`;
+    $("deliveryDuplicatesCard").className = `status ${stats.duplicates > 0 ? "warn" : ""}`;
     $("copyDeliveryBtn").disabled = !record;
     if (!record) {
       $("deliveryEventMeta").textContent = "收到业务消息后，这里会显示每个账号和设备的接收结果。";
@@ -990,11 +1087,11 @@
       return;
     }
 
-    $("deliveryEventMeta").textContent = `事件：${record.type} · 消息 ID：${record.id} · 首次接收：${formatReceiptTime(record.firstReceivedAt)} · 当时在线：${stats.expected}`;
+    $("deliveryEventMeta").textContent = `事件：${record.type} · 消息 ID：${record.id} · 首次接收：${formatReceiptTime(record.firstReceivedAt)} · 首次消息到达时在线：${stats.expected}`;
     const rows = deliveryRows(record);
     $("deliveryTableBody").innerHTML = rows.map(({ client, receipt, deliveryStatus }) => {
       const [statusText, statusClass] = deliveryStatusView(deliveryStatus);
-      return `<tr><td><span class="delivery-pill ${statusClass}">${statusText}</span></td><td>${escapeHTML(client.account)}</td><td>${escapeHTML(client.playerId || "—")}</td><td>${escapeHTML(client.deviceId || "—")}</td><td>${escapeHTML(currentClientState(client))}</td><td>${formatReceiptTime(receipt?.firstReceivedAt)}</td><td>${receipt?.count || 0}</td></tr>`;
+      return `<tr><td><span class="delivery-pill ${statusClass}">${statusText}</span></td><td>${escapeHTML(client.account)}</td><td>${escapeHTML(client.playerId || "—")}</td><td>${escapeHTML(client.deviceId || "—")}</td><td>${escapeHTML(currentClientState(client))}</td><td>${formatDateTime(client.firstConnectedAt)}</td><td>${formatDateTime(client.lastConnectedAt)}</td><td>${formatReceiptTime(receipt?.firstReceivedAt)}</td><td>${receipt?.count || 0}</td></tr>`;
     }).join("");
     $("deliveryTable").hidden = rows.length === 0;
     $("deliveryEmpty").hidden = rows.length !== 0;
@@ -1008,15 +1105,15 @@
       `事件\t${record.type}`,
       `消息ID\t${record.id}`,
       `首次接收\t${new Date(record.firstReceivedAt).toISOString()}`,
-      `当时在线送达\t${stats.receivedOnline}/${stats.expected}`,
+      `已收到/当时在线\t${formatCoverage(stats.receivedOnline, stats.expected)}`,
       `在线未收到\t${stats.missing}`,
       `当时未连接\t${stats.notConnected}`,
       `重复收到账号\t${stats.duplicates}`,
       "",
-      "投递状态\t账号\tPlayer ID\tDevice ID\t当前 WS\t首次接收时间\t接收次数"
+      "投递状态\t账号\tPlayer ID\tDevice ID\t当前 WS\t首次连接时间\t最近连接时间\t首次接收时间\t接收次数"
     ];
     for (const { client, receipt, deliveryStatus } of deliveryRows(record)) {
-      lines.push([deliveryStatusView(deliveryStatus)[0], client.account, client.playerId || "", client.deviceId || "", currentClientState(client), receipt ? new Date(receipt.firstReceivedAt).toISOString() : "", receipt?.count || 0].join("\t"));
+      lines.push([deliveryStatusView(deliveryStatus)[0], client.account, client.playerId || "", client.deviceId || "", currentClientState(client), client.firstConnectedAt ? new Date(client.firstConnectedAt).toISOString() : "", client.lastConnectedAt ? new Date(client.lastConnectedAt).toISOString() : "", receipt ? new Date(receipt.firstReceivedAt).toISOString() : "", receipt?.count || 0].join("\t"));
     }
     await writeClipboardText(lines.join("\n"));
     const button = $("copyDeliveryBtn");
@@ -1034,6 +1131,10 @@
         settled = true;
         client.socket = socket;
         client.status = "online";
+        const connectedAt = Date.now();
+        if (!client.firstConnectedAt) client.firstConnectedAt = connectedAt;
+        client.lastConnectedAt = connectedAt;
+        client.disconnectedAt = 0;
         client.nextHeartbeatAt = Date.now() + Math.floor(Math.random() * 20000);
         client.nextRetryAt = 0;
         if (previous && previous !== socket) {
@@ -1057,6 +1158,7 @@
         if (client.socket !== socket) return;
         client.socket = null;
         client.status = state.batchRunning ? "offline" : "stopped";
+        client.disconnectedAt = Date.now();
         client.nextRetryAt = Date.now() + 2000 + Math.floor(Math.random() * 3000);
         updateBatchUI();
       };
@@ -1079,6 +1181,7 @@
     return {
       ...account, status: "queued", accessToken: "", refreshToken: "", websocketConfig: null,
       socket: null, sent: 0, business: 0, pong: 0, renewAt: 0, nextHeartbeatAt: 0, nextRetryAt: 0,
+      firstConnectedAt: 0, lastConnectedAt: 0, disconnectedAt: 0,
       accessRefreshPromise: null, renewPromise: null, lastError: ""
     };
   }
@@ -1146,6 +1249,7 @@
       }
     });
     log(`批量连接启动完成：在线=${batchOnlineCount()}，失败=${state.batchFailed}`, state.batchFailed ? "error" : "in");
+    if (batchOnlineCount() > 0) autoCollapseEnvironment();
   }
   function disconnectAccountPool(writeLog = true) {
     state.batchRunning = false;
@@ -1153,6 +1257,7 @@
     state.batchMaintenanceTimer = null;
     for (const client of state.batchClients.values()) {
       client.status = "stopped";
+      if (client.socket && client.firstConnectedAt) client.disconnectedAt = Date.now();
       if (client.socket) {
         client.socket.onclose = null;
         client.socket.close(1000, "batch stopped");
@@ -1165,25 +1270,33 @@
   function batchOnlineCount() {
     return Array.from(state.batchClients.values()).filter(client => client.status === "online" && client.socket?.readyState === WebSocket.OPEN).length;
   }
+  function setStatusTone(valueID, tone = "") {
+    const status = $(valueID).closest(".status");
+    if (status) status.className = `status ${tone}`.trim();
+  }
   function updateBatchUI() {
     const clients = Array.from(state.batchClients.values());
     const connecting = clients.filter(client => ["queued", "authenticating", "connecting"].includes(client.status)).length;
     $("batchOnline").textContent = String(batchOnlineCount());
     $("batchConnecting").textContent = String(connecting);
     $("batchFailed").textContent = String(state.batchFailed);
+    setStatusTone("batchOnline", clients.length && batchOnlineCount() === clients.length ? "good" : state.batchRunning ? "warn" : "");
+    setStatusTone("batchConnecting", connecting > 0 ? "warn" : "");
+    setStatusTone("batchFailed", state.batchFailed > 0 ? "bad" : clients.length ? "good" : "");
     const heartbeatSent = clients.reduce((sum, client) => sum + client.sent, 0);
     const heartbeatPong = clients.reduce((sum, client) => sum + client.pong, 0);
     $("batchHeartbeatStats").textContent = `${heartbeatSent} / ${heartbeatPong}`;
     $("batchBusiness").textContent = String(clients.reduce((sum, client) => sum + client.business, 0));
     const latestEvent = state.batchEvents.get(state.latestBatchEventID);
     const latestStats = deliveryStats(latestEvent);
-    $("batchCoverage").textContent = latestEvent ? `${latestStats.receivedOnline}/${latestStats.expected}` : "—";
+    $("batchCoverage").textContent = latestEvent ? formatCoverage(latestStats.receivedOnline, latestStats.expected) : "—";
+    setStatusTone("batchCoverage", !latestEvent ? "" : latestStats.missing > 0 ? "bad" : "good");
     $("batchConnectBtn").disabled = state.batchRunning || state.poolRunning;
     $("batchConnectBtn").textContent = state.batchRunning ? "批量连接运行中" : "批量登录并连接";
     $("batchDisconnectBtn").disabled = !state.batchRunning && !clients.some(client => client.socket);
     const configuredTarget = Number.parseInt($("batchCount").value, 10) || 0;
     const target = clients.length || configuredTarget;
-    $("batchConnectionTabBtn").textContent = `批量连接（${batchOnlineCount()}/${target}）`;
+    $("batchConnectionTabBtn").textContent = `② 批量连接（${batchOnlineCount()}/${target}）`;
     updateModeIndicators();
     scheduleDeliveryRender();
   }
@@ -1219,6 +1332,8 @@
     $("batchDebugTabBtn").classList.toggle("active", !showSingle);
     $("singleDebugTabBtn").setAttribute("aria-selected", String(showSingle));
     $("batchDebugTabBtn").setAttribute("aria-selected", String(!showSingle));
+    $("deliveryOutputTabBtn").hidden = showSingle;
+    setOutputPanel(showSingle ? "log" : "delivery");
     updateModeIndicators();
   }
   function updateModeIndicators() {
@@ -1250,6 +1365,11 @@
     $("wsState").textContent = wsOpen ? "已连接" : state.websocket?.readyState === WebSocket.CONNECTING ? "连接中" : "未连接";
     $("heartbeatStats").textContent = `${state.heartbeatSentCount} / ${state.heartbeatResponseCount}`;
     $("businessMessageCount").textContent = String(state.businessMessageCount);
+    $("singleFirstConnectedAt").textContent = formatDateTime(state.singleFirstConnectedAt);
+    const durationEnd = state.websocket?.readyState === WebSocket.OPEN ? Date.now() : state.singleDisconnectedAt;
+    $("singleOnlineDuration").textContent = state.singleFirstConnectedAt && durationEnd
+      ? formatDuration(durationEnd - state.singleFirstConnectedAt)
+      : "—";
     updateModeIndicators();
     updateCountdowns();
     updateUserInfo();
@@ -1257,6 +1377,10 @@
   function updateCountdowns() {
     $("accessCountdown").textContent = formatRemaining(tokenExpiry(state.accessToken));
     $("wsCountdown").textContent = formatRemaining(tokenExpiry(state.websocketConfig?.token || ""));
+    if (state.singleFirstConnectedAt) {
+      const durationEnd = state.websocket?.readyState === WebSocket.OPEN ? Date.now() : state.singleDisconnectedAt;
+      $("singleOnlineDuration").textContent = durationEnd ? formatDuration(durationEnd - state.singleFirstConnectedAt) : "—";
+    }
   }
   function setBusy(busy) {
     $("loginBtn").disabled = busy;
@@ -1334,15 +1458,25 @@
   $("deliveryFilterSelect").addEventListener("change", renderDeliveryDetails);
   $("deliverySearch").addEventListener("input", scheduleDeliveryRender);
   $("copyDeliveryBtn").addEventListener("click", () => copyDeliveryDetails().catch(handleError));
+  $("environmentToggleBtn").addEventListener("click", () => setEnvironmentCollapsed(!state.environmentCollapsed));
+  $("deliveryOutputTabBtn").addEventListener("click", () => setOutputPanel("delivery"));
+  $("logOutputTabBtn").addEventListener("click", () => setOutputPanel("log"));
+  for (const card of document.querySelectorAll("[data-delivery-filter]")) {
+    card.addEventListener("click", () => {
+      $("deliveryFilterSelect").value = card.dataset.deliveryFilter;
+      renderDeliveryDetails();
+    });
+  }
   $("singleDebugTabBtn").addEventListener("click", () => setDebugMode("single"));
   $("batchDebugTabBtn").addEventListener("click", () => setDebugMode("batch"));
   $("accountPoolTabBtn").addEventListener("click", () => setBatchTab("pool"));
   $("batchConnectionTabBtn").addEventListener("click", () => setBatchTab("connections"));
-  for (const id of formIDs) $(id).addEventListener("change", () => { saveConfig(); updatePoolUI(); updateBatchUI(); });
+  for (const id of formIDs) $(id).addEventListener("change", () => { saveConfig(); updateEnvironmentSummary(); updatePoolUI(); updateBatchUI(); });
   window.addEventListener("beforeunload", () => { disconnect(); disconnectAccountPool(false); });
 
   restoreConfig();
   loadAccountPool();
+  setEnvironmentCollapsed(false);
   setDebugMode("single");
   state.countdownTimer = setInterval(updateCountdowns, 1000);
   updateUI();
