@@ -80,8 +80,26 @@
     .mode-switch-label { color: var(--muted); font-size: 12px; font-weight: 600; }
     .mode-stack { display: grid; gap: 16px; }
     .mode-stack[hidden] { display: none; }
+    .delivery { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+    .delivery-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+    .delivery-header h3 { margin: 0; font-size: 14px; }
+    .delivery-controls { display: grid; grid-template-columns: minmax(200px, 1.4fr) minmax(130px, .7fr) minmax(160px, 1fr) auto; gap: 8px; align-items: end; }
+    .delivery-meta { margin: 10px 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    .delivery .status-row { grid-template-columns: repeat(4, 1fr); }
+    .table-wrap { max-height: 330px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; background: #081423; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 8px 9px; border-bottom: 1px solid rgba(40,64,95,.55); text-align: left; white-space: nowrap; }
+    th { position: sticky; top: 0; z-index: 1; color: var(--muted); background: #102039; }
+    tbody tr:hover { background: rgba(77,159,255,.06); }
+    .delivery-empty { padding: 26px 12px; color: var(--muted); text-align: center; }
+    .delivery-empty[hidden] { display: none; }
+    .delivery-pill { display: inline-flex; padding: 2px 7px; border-radius: 999px; border: 1px solid currentColor; font-size: 11px; }
+    .delivery-pill.received { color: var(--green); }
+    .delivery-pill.late { color: var(--blue); }
+    .delivery-pill.missing { color: var(--red); }
+    .delivery-pill.not-connected { color: var(--muted); }
     @media (max-width: 1050px) { .grid { grid-template-columns: 1fr; } .log { height: 420px; } }
-    @media (max-width: 680px) { .fields, .status-row { grid-template-columns: 1fr; } }
+    @media (max-width: 680px) { .fields, .status-row, .delivery .status-row, .delivery-controls { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -203,6 +221,32 @@
           <div class="status"><div id="batchCoverage" class="value">—</div><div class="label">最新业务消息覆盖</div></div>
         </div>
         <div class="hint">每个账号只建立 1 条连接，不会触发“同一用户最多 3 条连接”的挤下线规则。WS Token 会分散到期前自动换新。</div>
+
+        <div class="delivery">
+          <div class="delivery-header">
+            <h3>业务消息投递明细</h3>
+            <button id="copyDeliveryBtn" disabled>复制当前明细</button>
+          </div>
+          <div class="delivery-controls">
+            <div class="field"><label for="deliveryEventSelect">业务消息（最近 20 条）</label><select id="deliveryEventSelect" disabled><option value="">暂无业务消息</option></select></div>
+            <div class="field"><label for="deliveryFilterSelect">接收状态</label><select id="deliveryFilterSelect"><option value="all">全部</option><option value="received">已收到</option><option value="missing">在线未收到</option><option value="not_connected">当时未连接</option><option value="duplicate">重复收到</option></select></div>
+            <div class="field"><label for="deliverySearch">搜索账号 / Player ID / Device ID</label><input id="deliverySearch" placeholder="输入关键字"></div>
+          </div>
+          <div id="deliveryEventMeta" class="delivery-meta">收到业务消息后，这里会显示每个账号和设备的接收结果。</div>
+          <div class="status-row" style="margin-bottom:10px">
+            <div class="status"><div id="deliveryOnlineCoverage" class="value">—</div><div class="label">当时在线送达</div></div>
+            <div class="status"><div id="deliveryMissing" class="value">0</div><div class="label">在线未收到</div></div>
+            <div class="status"><div id="deliveryNotConnected" class="value">0</div><div class="label">当时未连接</div></div>
+            <div class="status"><div id="deliveryDuplicates" class="value">0</div><div class="label">重复收到账号</div></div>
+          </div>
+          <div class="table-wrap">
+            <div id="deliveryEmpty" class="delivery-empty">暂无可查看的业务消息</div>
+            <table id="deliveryTable" hidden>
+              <thead><tr><th>投递状态</th><th>账号</th><th>Player ID</th><th>Device ID</th><th>当前 WS</th><th>首次接收时间</th><th>接收次数</th></tr></thead>
+              <tbody id="deliveryTableBody"></tbody>
+            </table>
+          </div>
+        </div>
         </div>
       </section>
       </div>
@@ -264,6 +308,8 @@
     batchFailed: 0,
     batchEvents: new Map(),
     latestBatchEventID: "",
+    selectedBatchEventID: "",
+    deliveryRenderScheduled: false,
     businessLogOnly: false,
     debugMode: "single"
   };
@@ -775,13 +821,29 @@
     client.renewAt = tokenExpiry(response.websocket.token) - 30 - Math.floor(Math.random() * 16);
     return response.websocket;
   }
+  function parseObject(value) {
+    if (value && typeof value === "object") return value;
+    if (typeof value !== "string" || !value.trim()) return null;
+    try {
+      const decoded = JSON.parse(value);
+      return decoded && typeof decoded === "object" ? decoded : null;
+    } catch (_) {
+      return null;
+    }
+  }
+  function batchEventPayload(value) {
+    if (!value || typeof value !== "object") return {};
+    return parseObject(value.metadata) || parseObject(value.content) || {};
+  }
   function batchEventID(value) {
     if (!value || typeof value !== "object") return "";
-    let metadata = value.metadata;
-    if (typeof metadata === "string") {
-      try { metadata = JSON.parse(metadata); } catch (_) { metadata = null; }
-    }
-    return String(value.message_id || value.id || metadata?.message_id || metadata?.event || value.biz_id || "");
+    const payload = batchEventPayload(value);
+    const fallback = payload.event && payload.occurred_at ? `${payload.event}:${payload.occurred_at}` : "";
+    return String(value.message_id || value.biz_id || payload.message_id || payload.marquee_id || fallback || value.id || "");
+  }
+  function batchEventType(value) {
+    const payload = batchEventPayload(value);
+    return String(payload.event || value?.title || value?.biz_type || value?.message_type || "BUSINESS_MESSAGE");
   }
   function recordBatchMessage(client, value) {
     const messageType = value && typeof value === "object" ? String(value.message_type || "").toLowerCase() : "";
@@ -792,12 +854,174 @@
     if (messageType === "ping") return;
     client.business++;
     const eventID = batchEventID(value) || `unknown-${Date.now()}`;
-    if (!state.batchEvents.has(eventID)) state.batchEvents.set(eventID, new Set());
-    const receivers = state.batchEvents.get(eventID);
-    const firstReceipt = receivers.size === 0;
-    receivers.add(client.account);
+    const previousLatest = state.latestBatchEventID;
+    let record = state.batchEvents.get(eventID);
+    const firstReceipt = !record;
+    const receivedAt = Date.now();
+    if (!record) {
+      const onlineAccounts = new Set(Array.from(state.batchClients.values())
+        .filter(item => item.status === "online" && item.socket?.readyState === WebSocket.OPEN)
+        .map(item => item.account));
+      record = {
+        id: eventID,
+        type: batchEventType(value),
+        firstReceivedAt: receivedAt,
+        message: value,
+        onlineAccounts,
+        receivers: new Map()
+      };
+      state.batchEvents.set(eventID, record);
+      while (state.batchEvents.size > 20) state.batchEvents.delete(state.batchEvents.keys().next().value);
+      if (!state.selectedBatchEventID || state.selectedBatchEventID === previousLatest) state.selectedBatchEventID = eventID;
+    }
+    const receipt = record.receivers.get(client.account) || { firstReceivedAt: receivedAt, lastReceivedAt: receivedAt, count: 0 };
+    receipt.count++;
+    receipt.lastReceivedAt = receivedAt;
+    record.receivers.set(client.account, receipt);
     state.latestBatchEventID = eventID;
     if (firstReceipt) log(`[批量连接] 收到业务消息 ${eventID}\n${formatJSON(value)}`, "in", "business");
+    scheduleDeliveryRender();
+  }
+  function selectedDeliveryRecord() {
+    if (!state.batchEvents.has(state.selectedBatchEventID)) state.selectedBatchEventID = state.latestBatchEventID;
+    return state.batchEvents.get(state.selectedBatchEventID) || null;
+  }
+  function deliveryStats(record) {
+    const clients = Array.from(state.batchClients.values());
+    if (!record) return { expected: 0, receivedOnline: 0, missing: 0, notConnected: clients.length, duplicates: 0 };
+    let receivedOnline = 0;
+    let duplicates = 0;
+    for (const [account, receipt] of record.receivers) {
+      if (record.onlineAccounts.has(account)) receivedOnline++;
+      if (receipt.count > 1) duplicates++;
+    }
+    return {
+      expected: record.onlineAccounts.size,
+      receivedOnline,
+      missing: Math.max(0, record.onlineAccounts.size - receivedOnline),
+      notConnected: clients.filter(client => !record.onlineAccounts.has(client.account)).length,
+      duplicates
+    };
+  }
+  function deliveryRows(record, applyFilters = true) {
+    if (!record) return [];
+    const filter = applyFilters ? $("deliveryFilterSelect").value : "all";
+    const search = applyFilters ? $("deliverySearch").value.trim().toLowerCase() : "";
+    return Array.from(state.batchClients.values()).sort((a, b) => a.account.localeCompare(b.account)).map(client => {
+      const receipt = record.receivers.get(client.account);
+      const expectedOnline = record.onlineAccounts.has(client.account);
+      const deliveryStatus = receipt ? (expectedOnline ? "received" : "late") : expectedOnline ? "missing" : "not_connected";
+      return { client, receipt, deliveryStatus };
+    }).filter(row => {
+      if (filter === "received" && !row.receipt) return false;
+      if (filter === "missing" && row.deliveryStatus !== "missing") return false;
+      if (filter === "not_connected" && row.deliveryStatus !== "not_connected") return false;
+      if (filter === "duplicate" && (!row.receipt || row.receipt.count <= 1)) return false;
+      if (!search) return true;
+      return [row.client.account, row.client.playerId, row.client.deviceId].some(value => String(value || "").toLowerCase().includes(search));
+    });
+  }
+  function formatReceiptTime(timestamp) {
+    if (!timestamp) return "—";
+    const date = new Date(timestamp);
+    return `${date.toLocaleTimeString("zh-CN", { hour12: false })}.${String(date.getMilliseconds()).padStart(3, "0")}`;
+  }
+  function deliveryStatusView(status) {
+    switch (status) {
+      case "received": return ["已收到", "received"];
+      case "late": return ["后续收到", "late"];
+      case "missing": return ["在线未收到", "missing"];
+      default: return ["当时未连接", "not-connected"];
+    }
+  }
+  function currentClientState(client) {
+    if (client.status === "online" && client.socket?.readyState === WebSocket.OPEN) return "在线";
+    if (client.status === "queued") return "等待连接";
+    if (["authenticating", "connecting"].includes(client.status)) return "连接中";
+    if (client.status === "failed") return "失败";
+    if (client.status === "offline") return "离线/重连中";
+    return "已停止";
+  }
+  function scheduleDeliveryRender() {
+    if (state.deliveryRenderScheduled) return;
+    state.deliveryRenderScheduled = true;
+    requestAnimationFrame(() => {
+      state.deliveryRenderScheduled = false;
+      renderDeliveryDetails();
+    });
+  }
+  function renderDeliveryDetails() {
+    const select = $("deliveryEventSelect");
+    const records = Array.from(state.batchEvents.values()).reverse();
+    const selectedBefore = state.selectedBatchEventID;
+    select.replaceChildren();
+    if (!records.length) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "暂无业务消息";
+      select.appendChild(option);
+      select.disabled = true;
+    } else {
+      for (const record of records) {
+        const stats = deliveryStats(record);
+        const option = document.createElement("option");
+        option.value = record.id;
+        option.textContent = `${record.type} · ${record.id} · ${stats.receivedOnline}/${stats.expected}`;
+        select.appendChild(option);
+      }
+      select.disabled = false;
+      state.selectedBatchEventID = state.batchEvents.has(selectedBefore) ? selectedBefore : state.latestBatchEventID;
+      select.value = state.selectedBatchEventID;
+    }
+
+    const record = selectedDeliveryRecord();
+    const stats = deliveryStats(record);
+    $("deliveryOnlineCoverage").textContent = record ? `${stats.receivedOnline}/${stats.expected}` : "—";
+    $("deliveryMissing").textContent = String(stats.missing);
+    $("deliveryNotConnected").textContent = String(stats.notConnected);
+    $("deliveryDuplicates").textContent = String(stats.duplicates);
+    $("copyDeliveryBtn").disabled = !record;
+    if (!record) {
+      $("deliveryEventMeta").textContent = "收到业务消息后，这里会显示每个账号和设备的接收结果。";
+      $("deliveryTable").hidden = true;
+      $("deliveryEmpty").hidden = false;
+      $("deliveryEmpty").textContent = "暂无可查看的业务消息";
+      $("deliveryTableBody").innerHTML = "";
+      return;
+    }
+
+    $("deliveryEventMeta").textContent = `事件：${record.type} · 消息 ID：${record.id} · 首次接收：${formatReceiptTime(record.firstReceivedAt)} · 当时在线：${stats.expected}`;
+    const rows = deliveryRows(record);
+    $("deliveryTableBody").innerHTML = rows.map(({ client, receipt, deliveryStatus }) => {
+      const [statusText, statusClass] = deliveryStatusView(deliveryStatus);
+      return `<tr><td><span class="delivery-pill ${statusClass}">${statusText}</span></td><td>${escapeHTML(client.account)}</td><td>${escapeHTML(client.playerId || "—")}</td><td>${escapeHTML(client.deviceId || "—")}</td><td>${escapeHTML(currentClientState(client))}</td><td>${formatReceiptTime(receipt?.firstReceivedAt)}</td><td>${receipt?.count || 0}</td></tr>`;
+    }).join("");
+    $("deliveryTable").hidden = rows.length === 0;
+    $("deliveryEmpty").hidden = rows.length !== 0;
+    $("deliveryEmpty").textContent = "当前筛选条件下没有连接记录";
+  }
+  async function copyDeliveryDetails() {
+    const record = selectedDeliveryRecord();
+    if (!record) return;
+    const stats = deliveryStats(record);
+    const lines = [
+      `事件\t${record.type}`,
+      `消息ID\t${record.id}`,
+      `首次接收\t${new Date(record.firstReceivedAt).toISOString()}`,
+      `当时在线送达\t${stats.receivedOnline}/${stats.expected}`,
+      `在线未收到\t${stats.missing}`,
+      `当时未连接\t${stats.notConnected}`,
+      `重复收到账号\t${stats.duplicates}`,
+      "",
+      "投递状态\t账号\tPlayer ID\tDevice ID\t当前 WS\t首次接收时间\t接收次数"
+    ];
+    for (const { client, receipt, deliveryStatus } of deliveryRows(record)) {
+      lines.push([deliveryStatusView(deliveryStatus)[0], client.account, client.playerId || "", client.deviceId || "", currentClientState(client), receipt ? new Date(receipt.firstReceivedAt).toISOString() : "", receipt?.count || 0].join("\t"));
+    }
+    await writeClipboardText(lines.join("\n"));
+    const button = $("copyDeliveryBtn");
+    button.textContent = "已复制";
+    setTimeout(() => { button.textContent = "复制当前明细"; }, 1500);
   }
   function connectBatchSocket(client, config) {
     return new Promise((resolve, reject) => {
@@ -851,13 +1075,17 @@
     }).finally(() => { client.renewPromise = null; updateBatchUI(); });
     return client.renewPromise;
   }
-  async function startBatchClient(account) {
-    const client = {
-      ...account, status: "authenticating", accessToken: "", refreshToken: "", websocketConfig: null,
+  function createBatchClient(account) {
+    return {
+      ...account, status: "queued", accessToken: "", refreshToken: "", websocketConfig: null,
       socket: null, sent: 0, business: 0, pong: 0, renewAt: 0, nextHeartbeatAt: 0, nextRetryAt: 0,
       accessRefreshPromise: null, renewPromise: null, lastError: ""
     };
+  }
+  async function startBatchClient(account) {
+    const client = state.batchClients.get(account.account) || createBatchClient(account);
     state.batchClients.set(account.account, client);
+    client.status = "authenticating";
     updateBatchUI();
     const response = await authenticateAccount(client);
     client.accessToken = response.token || "";
@@ -896,7 +1124,9 @@
     state.batchClients = new Map();
     state.batchEvents = new Map();
     state.latestBatchEventID = "";
+    state.selectedBatchEventID = "";
     state.batchFailed = 0;
+    for (const account of accounts) state.batchClients.set(account.account, createBatchClient(account));
     state.batchRunning = true;
     state.batchMaintenanceTimer = setInterval(maintainBatchClients, 1000);
     updateBatchUI();
@@ -937,7 +1167,7 @@
   }
   function updateBatchUI() {
     const clients = Array.from(state.batchClients.values());
-    const connecting = clients.filter(client => ["authenticating", "connecting"].includes(client.status)).length;
+    const connecting = clients.filter(client => ["queued", "authenticating", "connecting"].includes(client.status)).length;
     $("batchOnline").textContent = String(batchOnlineCount());
     $("batchConnecting").textContent = String(connecting);
     $("batchFailed").textContent = String(state.batchFailed);
@@ -945,8 +1175,9 @@
     const heartbeatPong = clients.reduce((sum, client) => sum + client.pong, 0);
     $("batchHeartbeatStats").textContent = `${heartbeatSent} / ${heartbeatPong}`;
     $("batchBusiness").textContent = String(clients.reduce((sum, client) => sum + client.business, 0));
-    const coverage = state.batchEvents.get(state.latestBatchEventID);
-    $("batchCoverage").textContent = coverage ? `${coverage.size}/${clients.length}` : "—";
+    const latestEvent = state.batchEvents.get(state.latestBatchEventID);
+    const latestStats = deliveryStats(latestEvent);
+    $("batchCoverage").textContent = latestEvent ? `${latestStats.receivedOnline}/${latestStats.expected}` : "—";
     $("batchConnectBtn").disabled = state.batchRunning || state.poolRunning;
     $("batchConnectBtn").textContent = state.batchRunning ? "批量连接运行中" : "批量登录并连接";
     $("batchDisconnectBtn").disabled = !state.batchRunning && !clients.some(client => client.socket);
@@ -954,6 +1185,7 @@
     const target = clients.length || configuredTarget;
     $("batchConnectionTabBtn").textContent = `批量连接（${batchOnlineCount()}/${target}）`;
     updateModeIndicators();
+    scheduleDeliveryRender();
   }
 
   function updateUserInfo() {
@@ -1039,14 +1271,7 @@
     try { await action(); } catch (error) { handleError(error); } finally { setBusy(false); }
   }
 
-  async function copyLogs() {
-    const text = $("log").innerText.trim();
-    if (!text) {
-      const button = $("copyLogBtn");
-      button.textContent = state.businessLogOnly ? "暂无业务日志" : "暂无日志";
-      setTimeout(() => { button.textContent = "复制日志"; }, 1500);
-      return;
-    }
+  async function writeClipboardText(text) {
     try {
       await navigator.clipboard.writeText(text);
     } catch (_) {
@@ -1060,6 +1285,16 @@
       textarea.remove();
       if (!copied) throw new Error("浏览器拒绝访问剪贴板");
     }
+  }
+  async function copyLogs() {
+    const text = $("log").innerText.trim();
+    if (!text) {
+      const button = $("copyLogBtn");
+      button.textContent = state.businessLogOnly ? "暂无业务日志" : "暂无日志";
+      setTimeout(() => { button.textContent = "复制日志"; }, 1500);
+      return;
+    }
+    await writeClipboardText(text);
     const button = $("copyLogBtn");
     button.textContent = "已复制";
     setTimeout(() => { button.textContent = "复制日志"; }, 1500);
@@ -1092,6 +1327,13 @@
   $("clearPoolBtn").addEventListener("click", clearLocalAccountPool);
   $("batchConnectBtn").addEventListener("click", () => run(connectAccountPool));
   $("batchDisconnectBtn").addEventListener("click", () => disconnectAccountPool());
+  $("deliveryEventSelect").addEventListener("change", event => {
+    state.selectedBatchEventID = event.target.value;
+    renderDeliveryDetails();
+  });
+  $("deliveryFilterSelect").addEventListener("change", renderDeliveryDetails);
+  $("deliverySearch").addEventListener("input", scheduleDeliveryRender);
+  $("copyDeliveryBtn").addEventListener("click", () => copyDeliveryDetails().catch(handleError));
   $("singleDebugTabBtn").addEventListener("click", () => setDebugMode("single"));
   $("batchDebugTabBtn").addEventListener("click", () => setDebugMode("batch"));
   $("accountPoolTabBtn").addEventListener("click", () => setBatchTab("pool"));
